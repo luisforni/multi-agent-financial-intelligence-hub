@@ -12,6 +12,7 @@ export default {
   tab: {
     analysis: 'Analyse',
     portfolio: 'Portfolio',
+    feed: 'Aktivität',
   },
   watchlist: {
     title: 'Watchlist',
