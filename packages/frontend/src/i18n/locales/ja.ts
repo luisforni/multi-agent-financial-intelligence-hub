@@ -65,6 +65,7 @@ export default {
   },
   portfolio: {
     openPositions: '保有ポジション',
+    pricesUpdatingNote: '価格は市場取引時間中に更新されます（ET 9:30–16:00）',
     paperTrading: 'ペーパートレード · $10k/取引',
     noPositions: '保有ポジションなし',
     tradeHistory: '取引履歴',

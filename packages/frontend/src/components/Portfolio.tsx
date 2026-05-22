@@ -11,12 +11,14 @@ interface Props {
 
 function PnlBadge({ value, pct }: { value: number | null; pct: number | null }) {
   if (value === null) return <span className="text-gray-500">—</span>
+  // Show dash while price hasn't moved yet (within $0.01 of flat)
+  if (Math.abs(value) < 0.01) return <span className="text-gray-500 font-mono text-xs">$0.00</span>
   const pos = value >= 0
   return (
     <span className={`flex items-center gap-0.5 font-mono text-xs ${pos ? 'text-buy' : 'text-sell'}`}>
       {pos ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
-      ${Math.abs(value).toFixed(2)}
-      {pct !== null && <span className="text-gray-400 ml-0.5">({pct > 0 ? '+' : ''}{pct.toFixed(1)}%)</span>}
+      {pos ? '+' : '-'}${Math.abs(value).toFixed(2)}
+      {pct !== null && <span className="text-gray-400 ml-0.5">({Math.abs(pct).toFixed(1)}%)</span>}
     </span>
   )
 }
@@ -46,6 +48,8 @@ function ExitReasonBadge({ reason }: { reason: string }) {
 export function Portfolio({ positions, closedTrades, summary, onClose }: Props) {
   const { t } = useTranslation()
 
+  const allFlat = summary.total_pnl === 0 && positions.length > 0
+
   return (
     <div className="space-y-4">
       {/* Summary bar */}
@@ -55,17 +59,22 @@ export function Portfolio({ positions, closedTrades, summary, onClose }: Props) 
           [t('portfolio.realizedPnl'), summary.total_realized_pnl],
           [t('portfolio.totalPnl'), summary.total_pnl],
         ] as [string, number][]).map(([label, val]) => {
-          const color = val >= 0 ? 'text-buy' : 'text-sell'
+          const color = val === 0 ? 'text-gray-400' : val > 0 ? 'text-buy' : 'text-sell'
           return (
             <div key={label} className="bg-panel border border-border rounded-lg p-3 text-center">
               <p className="text-xs text-gray-500">{label}</p>
               <p className={`text-lg font-bold font-mono ${color}`}>
-                {val >= 0 ? '+' : ''}${val.toFixed(2)}
+                {val > 0 ? '+' : ''}${val.toFixed(2)}
               </p>
             </div>
           )
         })}
       </div>
+      {allFlat && (
+        <p className="text-xs text-gray-500 text-center -mt-2">
+          {t('portfolio.pricesUpdatingNote')}
+        </p>
+      )}
 
       {/* Open positions */}
       <div className="bg-panel border border-border rounded-xl overflow-hidden">
