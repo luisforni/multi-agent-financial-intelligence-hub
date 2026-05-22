@@ -27,6 +27,8 @@ export default {
     title: 'Live Activity',
     empty: 'Waiting for signals…',
     clear: 'Clear',
+    strongBuy: 'STRONG BUY',
+    strongSell: 'STRONG SELL',
     analysisStarted: 'Starting analysis…',
     analysisCancelled: 'Analysis cancelled',
     scanner: 'Scanner: {{direction}} ({{score}}) — {{signals}}',

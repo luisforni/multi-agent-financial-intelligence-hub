@@ -27,6 +27,8 @@ export default {
     title: 'Live-Aktivität',
     empty: 'Warte auf Signale…',
     clear: 'Löschen',
+    strongBuy: 'STARKER KAUF',
+    strongSell: 'STARKER VERKAUF',
     analysisStarted: 'Analyse wird gestartet…',
     analysisCancelled: 'Analyse abgebrochen',
     scanner: 'Scanner: {{direction}} ({{score}}) — {{signals}}',
