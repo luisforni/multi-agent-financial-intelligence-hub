@@ -50,6 +50,8 @@ export default {
     bearCase: 'Bärisches Szenario',
     keyRisks: 'Hauptrisiken',
     catalysts: 'Katalysatoren',
+    chartUpdated: 'aktualisiert {{age}}',
+    refreshChart: 'Diagramm aktualisieren',
     loadingChart: 'Diagramm wird geladen…',
     chart: 'Chart',
     confidence: '{{value}}% Konfidenz',
@@ -59,7 +61,6 @@ export default {
     analyzing: 'Wird analysiert…',
     analyze: 'Analysieren',
     cancel: 'Abbrechen',
-    loadingChart: 'Diagramm wird geladen…',
     chartError: 'Diagramm konnte nicht geladen werden',
   },
   portfolio: {

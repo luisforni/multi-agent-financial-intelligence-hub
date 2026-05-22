@@ -50,6 +50,8 @@ export default {
     bearCase: '空头逻辑',
     keyRisks: '主要风险',
     catalysts: '催化剂',
+    chartUpdated: '{{age}}前更新',
+    refreshChart: '刷新图表',
     loadingChart: '加载图表中…',
     chart: '图表',
     confidence: '{{value}}% 置信度',
@@ -59,7 +61,6 @@ export default {
     analyzing: '分析中…',
     analyze: '分析',
     cancel: '取消',
-    loadingChart: '加载图表中…',
     chartError: '图表加载失败',
   },
   portfolio: {
