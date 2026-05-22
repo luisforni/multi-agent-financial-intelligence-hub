@@ -12,6 +12,7 @@ export default {
   tab: {
     analysis: '分析',
     portfolio: '投资组合',
+    feed: '动态',
   },
   watchlist: {
     title: '自选股',
