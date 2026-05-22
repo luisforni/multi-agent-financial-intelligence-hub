@@ -65,6 +65,7 @@ export default {
   },
   portfolio: {
     openPositions: 'Posiciones Abiertas',
+    pricesUpdatingNote: 'Los precios se actualizan en horario de mercado (9:30–16:00 ET)',
     paperTrading: 'Paper trading · $10k/trade',
     noPositions: 'Sin posiciones abiertas',
     tradeHistory: 'Historial de Operaciones',

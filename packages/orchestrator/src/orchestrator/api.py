@@ -179,14 +179,34 @@ async def _open_position(rec: InvestmentRecommendation) -> None:
     direction = TradeDirection.LONG if rec.signal in (Signal.BUY, Signal.STRONG_BUY) else TradeDirection.SHORT
     quantity = round(POSITION_SIZE_USD / price, 4)
 
+    # Validate stop_loss — LLMs sometimes return wrong-direction values
+    stop_loss = rec.stop_loss
+    fallback_sl = price * (0.97 if direction == TradeDirection.LONG else 1.03)
+    if stop_loss is None:
+        stop_loss = round(fallback_sl, 2)
+    elif direction == TradeDirection.LONG and stop_loss >= price:
+        logger.warning("Invalid LONG stop_loss %.2f >= entry %.2f — using fallback", stop_loss, price)
+        stop_loss = round(price * 0.97, 2)
+    elif direction == TradeDirection.SHORT and stop_loss <= price:
+        logger.warning("Invalid SHORT stop_loss %.2f <= entry %.2f — using fallback", stop_loss, price)
+        stop_loss = round(price * 1.03, 2)
+
+    # Validate target_price
+    target = rec.target_price_base
+    if target is not None:
+        if direction == TradeDirection.LONG and target <= price:
+            target = round(price * 1.10, 2)
+        elif direction == TradeDirection.SHORT and target >= price:
+            target = round(price * 0.90, 2)
+
     pos = Position(
         ticker=ticker,
         company_name=rec.company_name,
         direction=direction,
         entry_price=price,
         quantity=quantity,
-        stop_loss=rec.stop_loss,
-        target_price=rec.target_price_base,
+        stop_loss=stop_loss,
+        target_price=target,
         current_price=price,
         signal=rec.signal,
     )
@@ -200,8 +220,8 @@ async def _open_position(rec: InvestmentRecommendation) -> None:
         "direction": direction,
         "entry_price": price,
         "quantity": quantity,
-        "stop_loss": rec.stop_loss,
-        "target_price": rec.target_price_base,
+        "stop_loss": stop_loss,
+        "target_price": target,
         "signal": rec.signal,
     })
 
