@@ -50,6 +50,8 @@ export default {
     bearCase: '弱気シナリオ',
     keyRisks: '主なリスク',
     catalysts: '触媒',
+    chartUpdated: '{{age}}前に更新',
+    refreshChart: 'チャートを更新',
     loadingChart: 'チャート読込中…',
     chart: 'チャート',
     confidence: '{{value}}% 確信度',
@@ -59,7 +61,6 @@ export default {
     analyzing: '分析中…',
     analyze: '分析する',
     cancel: 'キャンセル',
-    loadingChart: 'チャート読込中…',
     chartError: 'チャートを読み込めません',
   },
   portfolio: {
