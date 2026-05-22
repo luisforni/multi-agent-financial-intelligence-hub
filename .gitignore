@@ -1,0 +1,251 @@
+# ── macOS ──────────────────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.AppleDouble
+.LSOverride
+.Spotlight-V100
+.Trashes
+.AppleDB
+.AppleDesktop
+.apdisk
+Icon?
+Network Trash Folder
+Temporary Items
+
+# ── Windows ────────────────────────────────────────────────────────────────────
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# ── Linux ──────────────────────────────────────────────────────────────────────
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# ── IDEs — VS Code ─────────────────────────────────────────────────────────────
+.vscode/
+!.vscode/extensions.json
+
+# ── IDEs — JetBrains (IntelliJ, PyCharm, WebStorm, GoLand, Rider…) ────────────
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+.idea_modules/
+
+# ── IDEs — Eclipse ─────────────────────────────────────────────────────────────
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings/
+.springBeans
+.sts4-cache
+bin/
+
+# ── IDEs — NetBeans ────────────────────────────────────────────────────────────
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+# ── IDEs — Sublime Text ────────────────────────────────────────────────────────
+*.tmlanguage.cache
+*.tmPreferences.cache
+*.stTheme.cache
+*.sublime-workspace
+*.sublime-project
+
+# ── IDEs — Vim / Neovim ────────────────────────────────────────────────────────
+*.swp
+*.swo
+*.swn
+Session.vim
+.netrwhist
+tags
+
+# ── IDEs — Emacs ───────────────────────────────────────────────────────────────
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# ── IDEs — Xcode ───────────────────────────────────────────────────────────────
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+*.moved-aside
+DerivedData/
+*.hmap
+
+# ── AI / Claude Code ───────────────────────────────────────────────────────────
+.claude/
+
+# ── Python ─────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+*.manifest
+*.spec
+
+# ── Python — virtual environments ──────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# ── Python — uv ────────────────────────────────────────────────────────────────
+.uv/
+
+# ── Python — testing ───────────────────────────────────────────────────────────
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+htmlcov/
+
+# ── Python — type checkers ─────────────────────────────────────────────────────
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+pyrightconfig.json
+
+# ── Python — linters ───────────────────────────────────────────────────────────
+.ruff_cache/
+
+# ── Node / JavaScript / TypeScript ─────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.npm/
+.yarn/
+.pnp.*
+.eslintcache
+.stylelintcache
+
+# ── Frontend build output ───────────────────────────────────────────────────────
+packages/frontend/dist/
+packages/frontend/.vite/
+
+# ── Environment / secrets ──────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.env
+!.env.example
+
+# ── Databases ──────────────────────────────────────────────────────────────────
+# SQLite
+*.sqlite
+*.sqlite3
+*.db
+*.db3
+*.s3db
+*.sl3
+
+# PostgreSQL dumps
+*.dump
+*.pgdump
+*.sql.gz
+*.backup
+
+# Redis
+dump.rdb
+*.rdb
+appendonly.aof
+
+# LevelDB / RocksDB
+*.ldb
+*.sst
+
+# ── Logs ───────────────────────────────────────────────────────────────────────
+*.log
+*.log.*
+logs/
+log/
+
+# ── Docker ─────────────────────────────────────────────────────────────────────
+.docker/
+
+# ── Certificates & keys ────────────────────────────────────────────────────────
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+*.jks
+
+# ── Compiled / binary ──────────────────────────────────────────────────────────
+*.o
+*.a
+*.dylib
+*.dll
+*.exe
+*.out
+*.class
+*.jar
+*.war
+
+# ── Temporary files ────────────────────────────────────────────────────────────
+tmp/
+temp/
+.tmp/
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej

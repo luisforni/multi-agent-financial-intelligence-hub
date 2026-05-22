@@ -1,0 +1,121 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: fintelligence
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  market-data-agent:
+    build:
+      context: .
+      dockerfile: packages/market-data-agent/Dockerfile
+    env_file: .env
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - POSTGRES_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/fintelligence
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  sentiment-agent:
+    build:
+      context: .
+      dockerfile: packages/sentiment-agent/Dockerfile
+    env_file: .env
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - POSTGRES_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/fintelligence
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  risk-agent:
+    build:
+      context: .
+      dockerfile: packages/risk-agent/Dockerfile
+    env_file: .env
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - POSTGRES_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/fintelligence
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  scanner-agent:
+    build:
+      context: .
+      dockerfile: packages/scanner-agent/Dockerfile
+    env_file: .env
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  orchestrator:
+    build:
+      context: .
+      dockerfile: packages/orchestrator/Dockerfile
+    env_file: .env
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - POSTGRES_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/fintelligence
+    ports:
+      - "8005:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      market-data-agent:
+        condition: service_started
+      sentiment-agent:
+        condition: service_started
+      risk-agent:
+        condition: service_started
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: packages/frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3040:80"
+    depends_on:
+      - orchestrator
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+  postgres_data:
