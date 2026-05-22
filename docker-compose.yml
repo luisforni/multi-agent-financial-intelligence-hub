@@ -36,6 +36,8 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - POSTGRES_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/fintelligence
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       redis:
         condition: service_healthy
@@ -51,6 +53,8 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - POSTGRES_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/fintelligence
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       redis:
         condition: service_healthy
@@ -64,6 +68,8 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - POSTGRES_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/fintelligence
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       redis:
         condition: service_healthy
@@ -78,6 +84,8 @@ services:
     env_file: .env
     environment:
       - REDIS_URL=redis://redis:6379
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       redis:
         condition: service_healthy
@@ -91,6 +99,8 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - POSTGRES_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/fintelligence
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8005:8000"
     depends_on:

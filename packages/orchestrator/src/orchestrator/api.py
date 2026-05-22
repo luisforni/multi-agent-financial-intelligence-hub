@@ -44,6 +44,16 @@ ANALYSIS_COOLDOWN_SECONDS = 1800  # 30 minutes
 # Active analysis tasks: ticker → asyncio.Task (for cancellation)
 _active_tasks: dict[str, asyncio.Task[None]] = {}
 
+# Circuit breaker: consecutive LLM failures → pause scanner auto-analysis
+_consecutive_llm_failures = 0
+_LLM_FAILURE_THRESHOLD = 3   # pause after this many back-to-back failures
+_llm_paused_until: float = 0.0
+_LLM_PAUSE_SECONDS = 300     # 5-minute pause before retrying
+
+# Concurrency cap for scanner-triggered auto-analyses (manual analyses are unlimited)
+_MAX_AUTO_ANALYSES = 2
+_auto_analysis_count = 0
+
 ANALYSES_KEY = "fintelligence:analyses"
 
 # Paper portfolio (in-memory; Redis-backed for persistence)
@@ -359,17 +369,28 @@ async def _scanner_listener(redis_url: str) -> None:
                             })
                             if _coordinator:
                                 now = time.monotonic()
-                                last = _last_analysis_time.get(alert.ticker, 0)
-                                if now - last >= ANALYSIS_COOLDOWN_SECONDS and alert.ticker not in _active_tasks:
-                                    _last_analysis_time[alert.ticker] = now
-                                    task = asyncio.create_task(_auto_analyze(alert.ticker))
-                                    _active_tasks[alert.ticker] = task
-                                else:
-                                    remaining = int(ANALYSIS_COOLDOWN_SECONDS - (now - last))
+                                if now < _llm_paused_until:
                                     logger.debug(
-                                        "Skipping auto-analysis for %s (cooldown %ds remaining)",
-                                        alert.ticker, remaining,
+                                        "Scanner auto-analysis paused (LLM circuit breaker, %.0fs remaining)",
+                                        _llm_paused_until - now,
                                     )
+                                elif _auto_analysis_count >= _MAX_AUTO_ANALYSES:
+                                    logger.debug(
+                                        "Scanner auto-analysis at concurrency cap (%d/%d)",
+                                        _auto_analysis_count, _MAX_AUTO_ANALYSES,
+                                    )
+                                else:
+                                    last = _last_analysis_time.get(alert.ticker, 0)
+                                    if now - last >= ANALYSIS_COOLDOWN_SECONDS and alert.ticker not in _active_tasks:
+                                        _last_analysis_time[alert.ticker] = now
+                                        task = asyncio.create_task(_auto_analyze(alert.ticker))
+                                        _active_tasks[alert.ticker] = task
+                                    else:
+                                        remaining = int(ANALYSIS_COOLDOWN_SECONDS - (now - last))
+                                        logger.debug(
+                                            "Skipping auto-analysis for %s (cooldown %ds remaining)",
+                                            alert.ticker, remaining,
+                                        )
                         except Exception as exc:
                             logger.warning("Failed to process scanner alert: %s", exc)
             except asyncio.CancelledError:
@@ -400,12 +421,15 @@ async def _make_progress_cb(ticker: str):
 
 
 async def _auto_analyze(ticker: str) -> None:
+    global _consecutive_llm_failures, _llm_paused_until, _auto_analysis_count
     if not _coordinator:
         return
+    _auto_analysis_count += 1
     progress_cb = await _make_progress_cb(ticker)
     try:
         await ws_manager.broadcast({"type": "analysis_started", "ticker": ticker})
         rec = await _coordinator.analyze(ticker, on_progress=progress_cb)
+        _consecutive_llm_failures = 0  # reset circuit breaker on success
         summary = _rec_to_dict(rec)
         _recent_analyses.appendleft(summary)
         await _save_analysis_to_redis(summary)
@@ -414,9 +438,17 @@ async def _auto_analyze(ticker: str) -> None:
     except asyncio.CancelledError:
         await ws_manager.broadcast({"type": "analysis_cancelled", "ticker": ticker})
     except Exception as exc:
+        _consecutive_llm_failures += 1
         logger.exception("Auto-analysis failed for %s", ticker)
+        if _consecutive_llm_failures >= _LLM_FAILURE_THRESHOLD:
+            _llm_paused_until = time.monotonic() + _LLM_PAUSE_SECONDS
+            logger.warning(
+                "LLM unreachable — pausing scanner auto-analysis for %ds after %d consecutive failures",
+                _LLM_PAUSE_SECONDS, _consecutive_llm_failures,
+            )
         await ws_manager.broadcast({"type": "error", "ticker": ticker, "message": str(exc)})
     finally:
+        _auto_analysis_count -= 1
         _active_tasks.pop(ticker, None)
 
 
@@ -562,7 +594,13 @@ async def cancel_analysis(ticker: str = Path(...)) -> dict[str, Any]:
 
 @app.delete("/analyses", tags=["Analysis"])
 async def clear_analyses() -> dict[str, Any]:
+    global _consecutive_llm_failures, _llm_paused_until
     _recent_analyses.clear()
+    _last_analysis_time.clear()
+    _consecutive_llm_failures = 0
+    _llm_paused_until = 0.0
+    # Note: _auto_analysis_count is NOT reset here — active tasks are still running
+    # until cancelled via DELETE /analyze.
     if _redis:
         await _redis.delete(ANALYSES_KEY)
     return {"action": "cleared"}
