@@ -27,6 +27,8 @@ export default {
     title: 'ライブアクティビティ',
     empty: 'シグナル待機中…',
     clear: 'クリア',
+    strongBuy: '強い買い',
+    strongSell: '強い売り',
     analysisStarted: '分析開始中…',
     analysisCancelled: '分析がキャンセルされました',
     scanner: 'スキャナー：{{direction}} ({{score}}) — {{signals}}',
