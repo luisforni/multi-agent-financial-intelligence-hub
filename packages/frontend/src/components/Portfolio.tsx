@@ -10,22 +10,21 @@ interface Props {
 }
 
 function PnlBadge({ value, pct }: { value: number | null; pct: number | null }) {
-  if (value === null) return <span className="text-gray-500">—</span>
-  // Show dash while price hasn't moved yet (within $0.01 of flat)
-  if (Math.abs(value) < 0.01) return <span className="text-gray-500 font-mono text-xs">$0.00</span>
+  if (value === null) return <span className="text-muted">—</span>
+  if (Math.abs(value) < 0.01) return <span className="text-muted font-mono text-[11px]">$0.00</span>
   const pos = value >= 0
   return (
-    <span className={`flex items-center gap-0.5 font-mono text-xs ${pos ? 'text-buy' : 'text-sell'}`}>
-      {pos ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+    <span className={`flex items-center gap-0.5 font-mono text-[11px] ${pos ? 'text-buy' : 'text-sell'}`}>
+      {pos ? <TrendingUp size={9} /> : <TrendingDown size={9} />}
       {pos ? '+' : '-'}${Math.abs(value).toFixed(2)}
-      {pct !== null && <span className="text-gray-400 ml-0.5">({Math.abs(pct).toFixed(1)}%)</span>}
+      {pct !== null && <span className="text-muted ml-0.5">({Math.abs(pct).toFixed(1)}%)</span>}
     </span>
   )
 }
 
 function DirectionBadge({ direction }: { direction: 'LONG' | 'SHORT' }) {
   return (
-    <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${direction === 'LONG' ? 'bg-buy/20 text-buy' : 'bg-sell/20 text-sell'}`}>
+    <span className={`text-[10px] font-bold px-1 py-px ${direction === 'LONG' ? 'bg-buy/20 text-buy' : 'bg-sell/20 text-sell'}`}>
       {direction}
     </span>
   )
@@ -33,37 +32,31 @@ function DirectionBadge({ direction }: { direction: 'LONG' | 'SHORT' }) {
 
 function ExitReasonBadge({ reason }: { reason: string }) {
   const { t } = useTranslation()
-  const key = `portfolio.exit.${reason}` as const
-  const label = t(key, { defaultValue: reason })
+  const label = t(`portfolio.exit.${reason}`, { defaultValue: reason })
   const icons: Record<string, string> = {
-    stop_loss: '🛑',
-    take_profit: '🎯',
-    signal_reversal: '↩',
-    manual: '✋',
-    max_hold: '⏱',
+    stop_loss: '🛑', take_profit: '🎯', signal_reversal: '↩', manual: '✋', max_hold: '⏱',
   }
-  return <span className="text-xs text-gray-400">{icons[reason] ?? ''} {label}</span>
+  return <span className="text-[10px] text-muted">{icons[reason] ?? ''} {label}</span>
 }
 
 export function Portfolio({ positions, closedTrades, summary, onClose }: Props) {
   const { t } = useTranslation()
-
   const allFlat = summary.total_pnl === 0 && positions.length > 0
 
   return (
-    <div className="space-y-4">
-      {/* Summary bar */}
-      <div className="grid grid-cols-3 gap-3">
+    <div className="flex flex-col">
+      {/* Summary strip */}
+      <div className="grid grid-cols-3 border-b border-border">
         {([
           [t('portfolio.openPnl'), summary.total_open_pnl],
           [t('portfolio.realizedPnl'), summary.total_realized_pnl],
           [t('portfolio.totalPnl'), summary.total_pnl],
-        ] as [string, number][]).map(([label, val]) => {
-          const color = val === 0 ? 'text-gray-400' : val > 0 ? 'text-buy' : 'text-sell'
+        ] as [string, number][]).map(([label, val], i) => {
+          const color = val === 0 ? 'text-muted' : val > 0 ? 'text-buy' : 'text-sell'
           return (
-            <div key={label} className="bg-panel border border-border rounded-lg p-3 text-center">
-              <p className="text-xs text-gray-500">{label}</p>
-              <p className={`text-lg font-bold font-mono ${color}`}>
+            <div key={label} className={`px-2 py-2 text-center ${i < 2 ? 'border-r border-border' : ''}`}>
+              <p className="text-[10px] text-muted">{label}</p>
+              <p className={`text-[12px] font-bold font-mono ${color}`}>
                 {val > 0 ? '+' : ''}${val.toFixed(2)}
               </p>
             </div>
@@ -71,35 +64,36 @@ export function Portfolio({ positions, closedTrades, summary, onClose }: Props) 
         })}
       </div>
       {allFlat && (
-        <p className="text-xs text-gray-500 text-center -mt-2">
+        <p className="text-[10px] text-muted text-center py-1 border-b border-border bg-panel2/30">
           {t('portfolio.pricesUpdatingNote')}
         </p>
       )}
 
-      {/* Open positions */}
-      <div className="bg-panel border border-border rounded-xl overflow-hidden">
-        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-          <h3 className="font-semibold text-white text-sm flex items-center gap-2">
-            <DollarSign size={14} className="text-accent" />
+      {/* Open positions section */}
+      <div className="border-b border-border">
+        <div className="flex items-center justify-between px-3 h-[28px]">
+          <span className="text-[11px] font-semibold text-[#d1d4dc] flex items-center gap-1">
+            <DollarSign size={11} className="text-accent" />
             {t('portfolio.openPositions')}
-            <span className="bg-accent/20 text-accent text-xs px-1.5 rounded">{positions.length}</span>
-          </h3>
-          <p className="text-xs text-gray-500">{t('portfolio.paperTrading')}</p>
+          </span>
+          {positions.length > 0 && (
+            <span className="bg-accent/20 text-accent text-[10px] px-1 rounded-sm">{positions.length}</span>
+          )}
         </div>
 
         {positions.length === 0 ? (
-          <p className="text-sm text-gray-500 text-center py-6">{t('portfolio.noPositions')}</p>
+          <p className="text-[11px] text-muted text-center py-4">{t('portfolio.noPositions')}</p>
         ) : (
-          <div className="divide-y divide-border">
+          <div>
             {positions.map((p) => (
-              <div key={p.ticker} className="px-4 py-3 flex items-center gap-3">
+              <div key={p.ticker} className="px-3 py-1.5 flex items-start gap-2 border-t border-border/50 hover:bg-panel2/30">
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <span className="font-bold text-white font-mono">{p.ticker}</span>
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <span className="font-bold text-[12px] font-mono text-[#d1d4dc]">{p.ticker}</span>
                     <DirectionBadge direction={p.direction} />
-                    <span className="text-xs text-gray-500">{p.signal}</span>
+                    <span className="text-[10px] text-muted">{p.signal}</span>
                   </div>
-                  <div className="flex items-center gap-3 text-xs text-gray-400">
+                  <div className="flex flex-wrap gap-x-2 text-[10px] text-muted">
                     <span>{t('portfolio.entry')} ${p.entry_price.toFixed(2)}</span>
                     {p.current_price && <span>{t('portfolio.now')} ${p.current_price.toFixed(2)}</span>}
                     {p.stop_loss && <span className="text-sell">{t('portfolio.stop')} ${p.stop_loss.toFixed(2)}</span>}
@@ -108,14 +102,14 @@ export function Portfolio({ positions, closedTrades, summary, onClose }: Props) 
                 </div>
                 <div className="text-right shrink-0">
                   <PnlBadge value={p.unrealized_pnl} pct={p.unrealized_pnl_pct} />
-                  <p className="text-xs text-gray-500 mt-0.5">{p.quantity.toFixed(2)} {t('portfolio.shares')}</p>
+                  <p className="text-[10px] text-muted mt-px">{p.quantity.toFixed(2)} {t('portfolio.shares')}</p>
                 </div>
                 <button
-                  className="text-gray-500 hover:text-sell p-1 rounded transition-colors shrink-0"
+                  className="text-muted hover:text-sell p-0.5 transition-colors shrink-0 mt-px"
                   onClick={() => onClose(p.ticker)}
                   title={t('portfolio.closePosition')}
                 >
-                  <X size={14} />
+                  <X size={12} />
                 </button>
               </div>
             ))}
@@ -125,20 +119,20 @@ export function Portfolio({ positions, closedTrades, summary, onClose }: Props) 
 
       {/* Closed trades */}
       {closedTrades.length > 0 && (
-        <div className="bg-panel border border-border rounded-xl overflow-hidden">
-          <div className="px-4 py-3 border-b border-border">
-            <h3 className="font-semibold text-white text-sm">{t('portfolio.tradeHistory')}</h3>
+        <div>
+          <div className="flex items-center px-3 h-[28px] border-b border-border">
+            <span className="text-[11px] font-semibold text-[#d1d4dc]">{t('portfolio.tradeHistory')}</span>
           </div>
-          <div className="divide-y divide-border max-h-64 overflow-y-auto">
+          <div>
             {closedTrades.map((trade, i) => (
-              <div key={i} className="px-4 py-2.5 flex items-center gap-3">
+              <div key={i} className="px-3 py-1.5 flex items-center gap-2 border-b border-border/50 hover:bg-panel2/30">
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-white font-mono text-sm">{trade.ticker}</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-bold text-[12px] font-mono text-[#d1d4dc]">{trade.ticker}</span>
                     <DirectionBadge direction={trade.direction} />
                     <ExitReasonBadge reason={trade.exit_reason} />
                   </div>
-                  <p className="text-xs text-gray-500 mt-0.5">
+                  <p className="text-[10px] text-muted mt-px">
                     ${trade.entry_price.toFixed(2)} → ${trade.exit_price.toFixed(2)} · {new Date(trade.exit_time).toLocaleDateString()}
                   </p>
                 </div>

@@ -6,15 +6,15 @@ export function LanguageSwitcher() {
   const { i18n } = useTranslation()
 
   return (
-    <div className="flex items-center gap-1 text-gray-400">
-      <Globe size={12} className="shrink-0" />
+    <div className="flex items-center gap-1 text-muted">
+      <Globe size={11} className="shrink-0" />
       <select
         value={i18n.language}
         onChange={(e) => setLanguage(e.target.value as LangCode)}
-        className="bg-transparent text-xs text-gray-400 hover:text-white cursor-pointer outline-none"
+        className="bg-transparent border-none text-[11px] text-muted hover:text-[#d1d4dc] cursor-pointer outline-none"
       >
         {LANGUAGES.map((l) => (
-          <option key={l.code} value={l.code} className="bg-surface text-white">
+          <option key={l.code} value={l.code} className="bg-panel2 text-[#d1d4dc]">
             {l.label}
           </option>
         ))}

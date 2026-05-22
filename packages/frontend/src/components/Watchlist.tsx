@@ -1,12 +1,22 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Plus, Trash2, Zap, Loader2, X } from 'lucide-react'
+import type { Analysis } from '../types'
 import { api } from '../lib/api'
+
+const SIGNAL_DOT: Record<string, string> = {
+  STRONG_BUY: 'bg-buy',
+  BUY: 'bg-buy/60',
+  HOLD: 'bg-hold',
+  SELL: 'bg-sell/60',
+  STRONG_SELL: 'bg-sell',
+}
 
 interface Props {
   tickers: string[]
   analyzing: Set<string>
   selectedTicker: string | null
+  analyses?: Analysis[]
   onAdd: (ticker: string) => void
   onRemove: (ticker: string) => void
   onAnalyze: (ticker: string) => void
@@ -14,7 +24,7 @@ interface Props {
   onCancel: (ticker: string) => void
 }
 
-export function Watchlist({ tickers, analyzing, selectedTicker, onAdd, onRemove, onAnalyze, onSelect, onCancel }: Props) {
+export function Watchlist({ tickers, analyzing, selectedTicker, analyses = [], onAdd, onRemove, onAnalyze, onSelect, onCancel }: Props) {
   const { t } = useTranslation()
   const [input, setInput] = useState('')
   const [error, setError] = useState('')
@@ -34,67 +44,76 @@ export function Watchlist({ tickers, analyzing, selectedTicker, onAdd, onRemove,
   }
 
   return (
-    <div className="bg-panel border border-border rounded-xl p-4 flex flex-col gap-3">
-      <h2 className="font-semibold text-white shrink-0">{t('watchlist.title')}</h2>
-
-      <div className="flex gap-2 shrink-0">
-        <input
-          className="flex-1 min-w-0 bg-surface border border-border rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-accent"
-          placeholder={t('watchlist.placeholder')}
-          value={input}
-          onChange={(e) => setInput(e.target.value.toUpperCase())}
-          onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
-          maxLength={10}
-        />
-        <button
-          className="flex items-center gap-1 bg-accent hover:bg-accent/80 text-white text-sm px-3 py-1.5 rounded-lg transition-colors shrink-0"
-          onClick={handleAdd}
-        >
-          <Plus size={14} /> {t('watchlist.add')}
-        </button>
+    <div className="flex flex-col h-full">
+      <div className="h-[32px] shrink-0 border-b border-border flex items-center px-3">
+        <span className="text-[11px] font-semibold text-[#d1d4dc] uppercase tracking-wide">{t('watchlist.title')}</span>
       </div>
-      {error && <p className="text-xs text-sell shrink-0">{error}</p>}
 
-      {tickers.length === 0 && (
-        <p className="text-sm text-gray-500 text-center py-2">{t('watchlist.noTickers')}</p>
-      )}
+      <div className="shrink-0 p-2 border-b border-border">
+        <div className="flex gap-1">
+          <input
+            className="flex-1 min-w-0 h-[22px] px-2 text-[11px] rounded-sm"
+            placeholder={t('watchlist.placeholder')}
+            value={input}
+            onChange={(e) => setInput(e.target.value.toUpperCase())}
+            onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
+            maxLength={10}
+          />
+          <button
+            className="flex items-center justify-center bg-accent hover:bg-accent/80 text-white text-[11px] px-2 h-[22px] rounded-sm transition-colors shrink-0"
+            onClick={handleAdd}
+          >
+            <Plus size={11} />
+          </button>
+        </div>
+        {error && <p className="text-[10px] text-sell mt-1 truncate">{error}</p>}
+      </div>
 
-      <ul className="overflow-y-auto max-h-64 space-y-1 pr-0.5">
+      <div className="flex-1 overflow-y-auto">
+        {tickers.length === 0 && (
+          <p className="text-[11px] text-muted text-center py-4 px-2 leading-tight">{t('watchlist.noTickers')}</p>
+        )}
         {tickers.map((ticker) => {
           const isAnalyzing = analyzing.has(ticker)
           const isSelected = selectedTicker === ticker
+          const analysis = analyses.find(a => a.ticker === ticker)
+          const dotClass = analysis ? (SIGNAL_DOT[analysis.signal] ?? 'bg-muted') : ''
+
           return (
-            <li
+            <div
               key={ticker}
-              className={`flex items-center justify-between rounded-lg px-3 py-2 cursor-pointer transition-colors ${
-                isSelected ? 'bg-accent/20 border border-accent/40' : 'bg-surface hover:bg-white/5'
+              className={`flex items-center gap-1.5 px-2 h-[28px] cursor-pointer transition-colors border-l-2 select-none ${
+                isSelected
+                  ? 'bg-accent/10 border-l-accent'
+                  : 'border-l-transparent hover:bg-panel2'
               }`}
               onClick={() => onSelect(ticker)}
             >
-              <div className="flex items-center gap-2 min-w-0">
-                {isAnalyzing && <Loader2 size={10} className="animate-spin text-accent shrink-0" />}
-                <span className={`font-mono font-bold text-sm ${isSelected ? 'text-accent' : 'text-white'}`}>{ticker}</span>
-              </div>
-              <div className="flex items-center gap-0.5 shrink-0">
-                <button
-                  className="text-xs text-gray-500 hover:text-accent px-1.5 py-1 rounded transition-colors disabled:opacity-30"
-                  onClick={(e) => { e.stopPropagation(); isAnalyzing ? onCancel(ticker) : onAnalyze(ticker) }}
-                  title={isAnalyzing ? t('watchlist.cancel') : t('watchlist.analyze')}
-                >
-                  {isAnalyzing ? <X size={12} /> : <Zap size={12} />}
-                </button>
-                <button
-                  className="text-gray-500 hover:text-sell p-1 rounded transition-colors"
-                  onClick={(e) => { e.stopPropagation(); api.removeTicker(ticker).then(() => onRemove(ticker)) }}
-                  title={t('watchlist.remove')}
-                >
-                  <Trash2 size={12} />
-                </button>
-              </div>
-            </li>
+              {isAnalyzing
+                ? <Loader2 size={8} className="animate-spin text-accent shrink-0" />
+                : <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotClass || 'bg-transparent border border-border'}`} />
+              }
+              <span className={`font-mono font-bold text-[12px] flex-1 min-w-0 truncate ${isSelected ? 'text-accent' : 'text-[#d1d4dc]'}`}>
+                {ticker}
+              </span>
+              <button
+                className="text-muted hover:text-accent p-0.5 transition-colors shrink-0"
+                onClick={(e) => { e.stopPropagation(); isAnalyzing ? onCancel(ticker) : onAnalyze(ticker) }}
+                title={isAnalyzing ? t('watchlist.cancel') : t('watchlist.analyze')}
+              >
+                {isAnalyzing ? <X size={11} /> : <Zap size={11} />}
+              </button>
+              <button
+                className="text-muted hover:text-sell p-0.5 transition-colors shrink-0"
+                onClick={(e) => { e.stopPropagation(); api.removeTicker(ticker).then(() => onRemove(ticker)) }}
+                title={t('watchlist.remove')}
+              >
+                <Trash2 size={11} />
+              </button>
+            </div>
           )
         })}
-      </ul>
+      </div>
     </div>
   )
 }
