@@ -65,6 +65,7 @@ export default {
   },
   portfolio: {
     openPositions: '持仓',
+    pricesUpdatingNote: '价格在交易时段更新（美东时间 9:30–16:00）',
     paperTrading: '模拟交易 · $10k/笔',
     noPositions: '暂无持仓',
     tradeHistory: '交易记录',
