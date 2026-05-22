@@ -8,6 +8,8 @@ class Settings(BaseSettings):
 
     # LLM Provider — default: Ollama (local, no API key required)
     # Supported values: ollama, anthropic, openai, gemini, groq, mistral, together
+    # When running via Docker Compose use LLM_BASE_URL=http://host.docker.internal:11434
+    # When running locally (uv/pip) use LLM_BASE_URL=http://localhost:11434
     llm_provider: str = Field("ollama", alias="LLM_PROVIDER")
     llm_base_url: str = Field("http://localhost:11434", alias="LLM_BASE_URL")
 
