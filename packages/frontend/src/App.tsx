@@ -26,8 +26,13 @@ function lsSet(key: string, value: unknown) {
 // ── Feed helpers ──────────────────────────────────────────────────────────────
 
 let feedSeq = 0
-function makeFeedItem(type: FeedItem['type'], ticker: string, message: string): FeedItem {
-  return { id: String(++feedSeq), type, ticker, message, timestamp: new Date() }
+function makeFeedItem(
+  type: FeedItem['type'],
+  ticker: string,
+  message: string,
+  extra?: { signal?: string; confidence?: number }
+): FeedItem {
+  return { id: String(++feedSeq), type, ticker, message, timestamp: new Date(), ...extra }
 }
 
 const EMPTY_SUMMARY: PortfolioSummary = {
@@ -91,8 +96,11 @@ export default function App() {
     } else if (evt.type === 'analysis_complete') {
       setAnalyzing((prev) => { const s = new Set(prev); s.delete(evt.ticker); return s })
       setAnalyses((prev) => [evt.data, ...prev.filter((a) => a.ticker !== evt.ticker)])
+      const conf = Math.round(evt.data.confidence * 100)
+      const sig = evt.data.signal as string
       pushFeed(makeFeedItem('analysis_complete', evt.ticker,
-        t('analysis.confidence', { value: Math.round(evt.data.confidence * 100) }) + ` — ${evt.data.signal}`))
+        t('analysis.confidence', { value: conf }) + ` — ${sig}`,
+        { signal: sig, confidence: conf }))
     } else if (evt.type === 'error') {
       setAnalyzing((prev) => { const s = new Set(prev); s.delete(evt.ticker); return s })
       pushFeed(makeFeedItem('error', evt.ticker, evt.message))
@@ -139,8 +147,11 @@ export default function App() {
     try {
       const result = await api.analyze(ticker)
       setAnalyses((prev) => [result, ...prev.filter((a) => a.ticker !== ticker)])
+      const conf = Math.round(result.confidence * 100)
+      const sig = result.signal as string
       pushFeed(makeFeedItem('analysis_complete', ticker,
-        `${result.signal} — ${Math.round(result.confidence * 100)}% conf`))
+        `${sig} — ${conf}% conf`,
+        { signal: sig, confidence: conf }))
       refreshPortfolio()
     } catch (e) {
       pushFeed(makeFeedItem('error', ticker, String(e)))
