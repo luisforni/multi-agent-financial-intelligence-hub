@@ -27,6 +27,8 @@ export default {
     title: '实时动态',
     empty: '等待信号…',
     clear: '清除',
+    strongBuy: '强烈买入',
+    strongSell: '强烈卖出',
     analysisStarted: '开始分析…',
     analysisCancelled: '分析已取消',
     scanner: '扫描器：{{direction}} ({{score}}) — {{signals}}',

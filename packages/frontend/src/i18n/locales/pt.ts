@@ -27,6 +27,8 @@ export default {
     title: 'Atividade ao vivo',
     empty: 'Aguardando sinais…',
     clear: 'Limpar',
+    strongBuy: 'COMPRA FORTE',
+    strongSell: 'VENDA FORTE',
     analysisStarted: 'Iniciando análise…',
     analysisCancelled: 'Análise cancelada',
     scanner: 'Scanner: {{direction}} ({{score}}) — {{signals}}',
