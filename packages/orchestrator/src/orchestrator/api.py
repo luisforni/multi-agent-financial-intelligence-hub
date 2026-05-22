@@ -245,6 +245,9 @@ async def _close_position(ticker: str, exit_price: float, reason: str) -> Closed
     return trade
 
 
+MIN_HOLD_SECONDS = 300  # 5 minutes before a signal_reversal can close a position
+
+
 async def _handle_trade_signal(rec: InvestmentRecommendation) -> None:
     ticker = rec.ticker
     price = rec.market_data.current_price if rec.market_data else None
@@ -257,10 +260,26 @@ async def _handle_trade_signal(rec: InvestmentRecommendation) -> None:
     existing = _positions.get(ticker)
 
     if existing:
-        # Close on signal reversal
-        if existing.direction == TradeDirection.LONG and is_sell:
-            await _close_position(ticker, price, "signal_reversal")
-        elif existing.direction == TradeDirection.SHORT and is_buy:
+        reversal = (
+            (existing.direction == TradeDirection.LONG and is_sell) or
+            (existing.direction == TradeDirection.SHORT and is_buy)
+        )
+        if reversal:
+            from datetime import timezone
+            entry = existing.entry_time
+            # Make both datetimes timezone-aware for comparison
+            if entry.tzinfo is None:
+                from datetime import timezone
+                entry = entry.replace(tzinfo=timezone.utc)
+            from datetime import datetime as _dt
+            now = _dt.now(timezone.utc)
+            held_seconds = (now - entry).total_seconds()
+            if held_seconds < MIN_HOLD_SECONDS:
+                logger.debug(
+                    "Skipping signal reversal for %s — held only %.0fs (min %ds)",
+                    ticker, held_seconds, MIN_HOLD_SECONDS,
+                )
+                return
             await _close_position(ticker, price, "signal_reversal")
         else:
             return  # same direction, hold
@@ -275,7 +294,7 @@ async def _handle_trade_signal(rec: InvestmentRecommendation) -> None:
 async def _price_monitor() -> None:
     try:
         while True:
-            await asyncio.sleep(60)
+            await asyncio.sleep(30)
             if not _positions:
                 continue
             tickers = list(_positions.keys())

@@ -50,6 +50,8 @@ export default {
     bearCase: 'Scénario Baissier',
     keyRisks: 'Risques Clés',
     catalysts: 'Catalyseurs',
+    chartUpdated: 'mis à jour {{age}}',
+    refreshChart: 'Actualiser le graphique',
     loadingChart: 'Chargement du graphique…',
     chart: 'graphique',
     confidence: '{{value}}% conf',
@@ -59,7 +61,6 @@ export default {
     analyzing: 'Analyse en cours…',
     analyze: 'Analyser',
     cancel: 'Annuler',
-    loadingChart: 'Chargement du graphique…',
     chartError: 'Impossible de charger le graphique',
   },
   portfolio: {

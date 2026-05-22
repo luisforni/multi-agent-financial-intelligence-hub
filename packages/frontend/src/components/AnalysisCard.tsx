@@ -1,11 +1,13 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ChevronDown, ChevronUp, TrendingUp, TrendingDown, BarChart2, Clock } from 'lucide-react'
+import { ChevronDown, ChevronUp, TrendingUp, TrendingDown, BarChart2, Clock, RefreshCw } from 'lucide-react'
 import type { Analysis, Candle } from '../types'
 import { api } from '../lib/api'
 import { SignalBadge } from './SignalBadge'
 import { ScoreBar } from './ScoreBar'
 import { CandleChart } from './CandleChart'
+
+const CHART_REFRESH_MS = 5 * 60 * 1000  // 5 minutes
 
 interface Props {
   analysis: Analysis
@@ -16,12 +18,42 @@ export function AnalysisCard({ analysis: a, defaultExpanded = false }: Props) {
   const { t } = useTranslation()
   const [expanded, setExpanded] = useState(defaultExpanded)
   const [candles, setCandles] = useState<Candle[]>([])
+  const [chartUpdatedAt, setChartUpdatedAt] = useState<Date | null>(null)
+  const [chartAge, setChartAge] = useState('')
+  const refreshTimer = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  const fetchCandles = useCallback(() => {
+    api.getCandles(a.ticker).then((r) => {
+      setCandles(r.candles)
+      setChartUpdatedAt(new Date())
+    }).catch(() => {})
+  }, [a.ticker])
+
+  // Fetch on first expand, then auto-refresh every 5 minutes while expanded
   useEffect(() => {
-    if (expanded && candles.length === 0) {
-      api.getCandles(a.ticker).then((r) => setCandles(r.candles)).catch(() => {})
+    if (!expanded) {
+      if (refreshTimer.current) clearInterval(refreshTimer.current)
+      return
     }
-  }, [expanded, a.ticker, candles.length])
+    fetchCandles()
+    refreshTimer.current = setInterval(fetchCandles, CHART_REFRESH_MS)
+    return () => {
+      if (refreshTimer.current) clearInterval(refreshTimer.current)
+    }
+  }, [expanded, fetchCandles])
+
+  // Human-readable "updated X ago" ticker
+  useEffect(() => {
+    if (!chartUpdatedAt) return
+    const tick = () => {
+      const sec = Math.floor((Date.now() - chartUpdatedAt.getTime()) / 1000)
+      if (sec < 60) setChartAge(`${sec}s ago`)
+      else setChartAge(`${Math.floor(sec / 60)}m ago`)
+    }
+    tick()
+    const id = setInterval(tick, 15_000)
+    return () => clearInterval(id)
+  }, [chartUpdatedAt])
 
   const priceChange = a.current_price && a.targets.base
     ? ((a.targets.base - a.current_price) / a.current_price) * 100
@@ -70,6 +102,19 @@ export function AnalysisCard({ analysis: a, defaultExpanded = false }: Props) {
           {/* Chart */}
           {candles.length > 0 ? (
             <div className="mt-3">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs text-gray-500">{t('analysis.chartTitle')}</span>
+                <div className="flex items-center gap-2 text-xs text-gray-500">
+                  {chartAge && <span>{t('analysis.chartUpdated', { age: chartAge })}</span>}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); fetchCandles() }}
+                    className="hover:text-white transition-colors"
+                    title={t('analysis.refreshChart')}
+                  >
+                    <RefreshCw size={11} />
+                  </button>
+                </div>
+              </div>
               <CandleChart
                 candles={candles}
                 supportLevels={a.chart.support_levels}

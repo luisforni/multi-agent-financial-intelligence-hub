@@ -50,6 +50,8 @@ export default {
     bearCase: 'Bear Case',
     keyRisks: 'Key Risks',
     catalysts: 'Catalysts',
+    chartUpdated: 'updated {{age}}',
+    refreshChart: 'Refresh chart',
     loadingChart: 'Loading chart…',
     chart: 'chart',
     confidence: '{{value}}% conf',
@@ -59,7 +61,6 @@ export default {
     analyzing: 'Analyzing…',
     analyze: 'Analyze',
     cancel: 'Cancel',
-    loadingChart: 'Loading chart…',
     chartError: 'Could not load chart',
   },
   portfolio: {

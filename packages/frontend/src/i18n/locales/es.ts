@@ -50,6 +50,8 @@ export default {
     bearCase: 'Caso Bajista',
     keyRisks: 'Riesgos Clave',
     catalysts: 'Catalizadores',
+    chartUpdated: 'actualizado {{age}}',
+    refreshChart: 'Actualizar gráfico',
     loadingChart: 'Cargando gráfico…',
     chart: 'gráfico',
     confidence: '{{value}}% conf',
@@ -59,7 +61,6 @@ export default {
     analyzing: 'Analizando…',
     analyze: 'Analizar',
     cancel: 'Cancelar',
-    loadingChart: 'Cargando gráfico…',
     chartError: 'No se pudo cargar el gráfico',
   },
   portfolio: {
