@@ -7,7 +7,7 @@ import { SignalBadge } from './SignalBadge'
 import { ScoreBar } from './ScoreBar'
 import { CandleChart } from './CandleChart'
 
-const CHART_REFRESH_MS = 5 * 60 * 1000  // 5 minutes
+const CHART_REFRESH_MS = 5 * 60 * 1000
 
 interface Props {
   analysis: Analysis
@@ -29,7 +29,6 @@ export function AnalysisCard({ analysis: a, defaultExpanded = false }: Props) {
     }).catch(() => {})
   }, [a.ticker])
 
-  // Fetch on first expand, then auto-refresh every 5 minutes while expanded
   useEffect(() => {
     if (!expanded) {
       if (refreshTimer.current) clearInterval(refreshTimer.current)
@@ -42,7 +41,6 @@ export function AnalysisCard({ analysis: a, defaultExpanded = false }: Props) {
     }
   }, [expanded, fetchCandles])
 
-  // Human-readable "updated X ago" ticker
   useEffect(() => {
     if (!chartUpdatedAt) return
     const tick = () => {
@@ -60,58 +58,56 @@ export function AnalysisCard({ analysis: a, defaultExpanded = false }: Props) {
     : null
 
   return (
-    <div className="bg-panel border border-border rounded-xl overflow-hidden">
-      {/* Header */}
+    <div className="border border-border overflow-hidden">
       <button
-        className="w-full flex items-center justify-between px-4 py-3 hover:bg-white/5 transition-colors"
+        className="w-full flex items-center justify-between px-3 py-2 hover:bg-panel2/50 transition-colors"
         onClick={() => setExpanded(!expanded)}
       >
-        <div className="flex items-center gap-3 min-w-0">
+        <div className="flex items-center gap-2 min-w-0">
           <div className="text-left min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-white">{a.ticker}</span>
+            <div className="flex items-center gap-1.5">
+              <span className="font-bold text-[13px] font-mono text-[#d1d4dc]">{a.ticker}</span>
               <SignalBadge signal={a.signal} />
               {a.chart.chart_signal && a.chart.chart_signal !== 'HOLD' && (
-                <span className="text-xs text-gray-400 border border-border rounded px-1.5 py-0.5">
+                <span className="text-[10px] text-muted border border-border px-1 py-px">
                   {t('analysis.chart')}: {a.chart.chart_signal}
                 </span>
               )}
             </div>
-            <p className="text-xs text-gray-400 truncate">{a.company_name}</p>
+            <p className="text-[11px] text-muted truncate mt-px">{a.company_name}</p>
           </div>
         </div>
-        <div className="flex items-center gap-4 shrink-0 ml-4">
+        <div className="flex items-center gap-3 shrink-0 ml-3">
           {a.current_price && (
-            <span className="text-sm font-mono text-white">${a.current_price.toFixed(2)}</span>
+            <span className="text-[12px] font-mono text-[#d1d4dc]">${a.current_price.toFixed(2)}</span>
           )}
           {priceChange !== null && (
-            <span className={`text-xs font-mono flex items-center gap-0.5 ${priceChange >= 0 ? 'text-buy' : 'text-sell'}`}>
-              {priceChange >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+            <span className={`text-[11px] font-mono flex items-center gap-0.5 ${priceChange >= 0 ? 'text-buy' : 'text-sell'}`}>
+              {priceChange >= 0 ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
               {Math.abs(priceChange).toFixed(1)}%
             </span>
           )}
-          <span className="text-xs text-gray-500">
+          <span className="text-[11px] text-muted">
             {t('analysis.confidence', { value: Math.round((a.confidence ?? 0) * 100) })}
           </span>
-          {expanded ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
+          {expanded ? <ChevronUp size={14} className="text-muted" /> : <ChevronDown size={14} className="text-muted" />}
         </div>
       </button>
 
       {expanded && (
-        <div className="border-t border-border px-4 pb-4 space-y-4">
-          {/* Chart */}
+        <div className="border-t border-border px-3 pb-3 space-y-3">
           {candles.length > 0 ? (
-            <div className="mt-3">
+            <div className="mt-2">
               <div className="flex items-center justify-between mb-1">
-                <span className="text-xs text-gray-500">{t('analysis.chartTitle')}</span>
-                <div className="flex items-center gap-2 text-xs text-gray-500">
+                <span className="text-[10px] text-muted uppercase tracking-wide">{t('analysis.chartTitle')}</span>
+                <div className="flex items-center gap-1.5 text-[10px] text-muted">
                   {chartAge && <span>{t('analysis.chartUpdated', { age: chartAge })}</span>}
                   <button
                     onClick={(e) => { e.stopPropagation(); fetchCandles() }}
-                    className="hover:text-white transition-colors"
+                    className="hover:text-[#d1d4dc] transition-colors"
                     title={t('analysis.refreshChart')}
                   >
-                    <RefreshCw size={11} />
+                    <RefreshCw size={10} />
                   </button>
                 </div>
               </div>
@@ -122,12 +118,11 @@ export function AnalysisCard({ analysis: a, defaultExpanded = false }: Props) {
               />
             </div>
           ) : (
-            <div className="mt-3 h-16 flex items-center justify-center text-gray-500 text-sm">
-              <BarChart2 size={14} className="mr-1" /> {t('analysis.loadingChart')}
+            <div className="mt-2 h-12 flex items-center justify-center text-muted text-[11px]">
+              <BarChart2 size={12} className="mr-1" /> {t('analysis.loadingChart')}
             </div>
           )}
 
-          {/* Scores */}
           <div className="grid grid-cols-2 gap-2">
             <ScoreBar label={t('analysis.scores.technical')} value={a.scores.technical} />
             <ScoreBar label={t('analysis.scores.fundamental')} value={a.scores.fundamental} />
@@ -135,64 +130,59 @@ export function AnalysisCard({ analysis: a, defaultExpanded = false }: Props) {
             <ScoreBar label={t('analysis.scores.riskAdjusted')} value={a.scores.risk_adjusted} />
           </div>
 
-          {/* Price targets */}
-          <div className="grid grid-cols-4 gap-2 text-center">
+          <div className="grid grid-cols-4 gap-1.5 text-center">
             {([
               [t('analysis.targets.bull'), a.targets.bull, 'text-buy'],
-              [t('analysis.targets.base'), a.targets.base, 'text-white'],
+              [t('analysis.targets.base'), a.targets.base, 'text-[#d1d4dc]'],
               [t('analysis.targets.bear'), a.targets.bear, 'text-sell'],
-              [t('analysis.targets.stop'), a.targets.stop_loss, 'text-red-400'],
+              [t('analysis.targets.stop'), a.targets.stop_loss, 'text-sell'],
             ] as [string, number | null, string][]).map(([label, val, cls]) => (
-              <div key={label} className="bg-surface rounded p-2">
-                <p className="text-xs text-gray-500">{label}</p>
-                <p className={`text-sm font-mono font-bold ${cls}`}>
+              <div key={label} className="bg-surface border border-border p-1.5">
+                <p className="text-[10px] text-muted">{label}</p>
+                <p className={`text-[11px] font-mono font-bold ${cls}`}>
                   {val != null ? `$${val.toFixed(2)}` : '—'}
                 </p>
               </div>
             ))}
           </div>
 
-          {/* Executive summary */}
           {a.analysis.executive_summary && (
-            <p className="text-sm text-gray-300 leading-relaxed">{a.analysis.executive_summary}</p>
+            <p className="text-[11px] text-[#d1d4dc]/80 leading-relaxed">{a.analysis.executive_summary}</p>
           )}
 
-          {/* Chart summary */}
           {a.chart.chart_summary && (
-            <div className="bg-surface rounded p-3 border border-border">
-              <p className="text-xs font-semibold text-gray-400 mb-1 uppercase tracking-wide">{t('analysis.chartTitle')}</p>
-              <p className="text-sm text-gray-300">{a.chart.chart_summary}</p>
+            <div className="bg-surface border border-border p-2">
+              <p className="text-[10px] font-semibold text-muted mb-1 uppercase tracking-wide">{t('analysis.chartTitle')}</p>
+              <p className="text-[11px] text-[#d1d4dc]/80">{a.chart.chart_summary}</p>
               {a.chart.patterns.length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-2">
+                <div className="flex flex-wrap gap-1 mt-1.5">
                   {a.chart.patterns.map((p) => (
-                    <span key={p} className="text-xs bg-border px-1.5 py-0.5 rounded text-gray-400">{p}</span>
+                    <span key={p} className="text-[10px] bg-panel2 border border-border px-1.5 py-px text-muted">{p}</span>
                   ))}
                 </div>
               )}
             </div>
           )}
 
-          {/* Bull / Bear case */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-buy/10 border border-buy/20 rounded p-3">
-              <p className="text-xs font-semibold text-buy mb-1">{t('analysis.bullCase')}</p>
-              <p className="text-xs text-gray-300">{a.analysis.bull_case || '—'}</p>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="bg-buy/5 border border-buy/20 p-2">
+              <p className="text-[10px] font-semibold text-buy mb-1">{t('analysis.bullCase')}</p>
+              <p className="text-[10px] text-[#d1d4dc]/70">{a.analysis.bull_case || '—'}</p>
             </div>
-            <div className="bg-sell/10 border border-sell/20 rounded p-3">
-              <p className="text-xs font-semibold text-sell mb-1">{t('analysis.bearCase')}</p>
-              <p className="text-xs text-gray-300">{a.analysis.bear_case || '—'}</p>
+            <div className="bg-sell/5 border border-sell/20 p-2">
+              <p className="text-[10px] font-semibold text-sell mb-1">{t('analysis.bearCase')}</p>
+              <p className="text-[10px] text-[#d1d4dc]/70">{a.analysis.bear_case || '—'}</p>
             </div>
           </div>
 
-          {/* Key risks / catalysts */}
           {(a.analysis.key_risks.length > 0 || a.analysis.key_catalysts.length > 0) && (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-2">
               {a.analysis.key_risks.length > 0 && (
                 <div>
-                  <p className="text-xs font-semibold text-gray-400 mb-1">{t('analysis.keyRisks')}</p>
+                  <p className="text-[10px] font-semibold text-muted mb-1">{t('analysis.keyRisks')}</p>
                   <ul className="space-y-0.5">
                     {a.analysis.key_risks.map((r, i) => (
-                      <li key={i} className="text-xs text-gray-400 flex gap-1">
+                      <li key={i} className="text-[10px] text-muted flex gap-1">
                         <span className="text-sell shrink-0">•</span>{r}
                       </li>
                     ))}
@@ -201,10 +191,10 @@ export function AnalysisCard({ analysis: a, defaultExpanded = false }: Props) {
               )}
               {a.analysis.key_catalysts.length > 0 && (
                 <div>
-                  <p className="text-xs font-semibold text-gray-400 mb-1">{t('analysis.catalysts')}</p>
+                  <p className="text-[10px] font-semibold text-muted mb-1">{t('analysis.catalysts')}</p>
                   <ul className="space-y-0.5">
                     {a.analysis.key_catalysts.map((c, i) => (
-                      <li key={i} className="text-xs text-gray-400 flex gap-1">
+                      <li key={i} className="text-[10px] text-muted flex gap-1">
                         <span className="text-buy shrink-0">•</span>{c}
                       </li>
                     ))}
@@ -214,9 +204,8 @@ export function AnalysisCard({ analysis: a, defaultExpanded = false }: Props) {
             </div>
           )}
 
-          {/* Footer */}
-          <div className="flex items-center gap-2 text-xs text-gray-500 pt-1">
-            <Clock size={10} />
+          <div className="flex items-center gap-1.5 text-[10px] text-muted pt-0.5">
+            <Clock size={9} />
             <span>{new Date(a.meta.timestamp).toLocaleString()}</span>
             {a.meta.analysis_duration_seconds && (
               <span>· {t('analysis.duration', { value: a.meta.analysis_duration_seconds })}</span>

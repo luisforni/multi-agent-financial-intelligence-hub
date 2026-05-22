@@ -4,13 +4,20 @@ export default {
   theme: {
     extend: {
       colors: {
-        surface: '#0f1117',
-        panel: '#1a1d27',
-        border: '#2a2d3a',
-        accent: '#6366f1',
-        buy: '#22c55e',
-        sell: '#ef4444',
-        hold: '#f59e0b',
+        // TradingView-accurate palette
+        surface: '#131722',   // main background
+        panel:   '#1e222d',   // panels / sidebars
+        panel2:  '#2a2e39',   // secondary panels, inputs
+        border:  '#2a2e39',   // dividers and borders
+        accent:  '#2962ff',   // action blue (TV brand color)
+        buy:     '#26a69a',   // bullish teal-green
+        sell:    '#ef5350',   // bearish red
+        hold:    '#b2b5be',   // neutral grey (TV text-secondary)
+        muted:   '#787b86',   // dimmed text
+      },
+      fontFamily: {
+        sans: ['"Trebuchet MS"', 'system-ui', '-apple-system', 'Roboto', '"Segoe UI"', 'sans-serif'],
+        mono: ['"Courier New"', 'Consolas', 'monospace'],
       },
     },
   },
