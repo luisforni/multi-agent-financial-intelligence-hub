@@ -112,3 +112,4 @@ export type WsEvent =
   | { type: 'position_closed'; ticker: string; exit_price: number; realized_pnl: number; realized_pnl_pct: number; exit_reason: string }
   | { type: 'position_update'; ticker: string; current_price: number; unrealized_pnl: number | null; unrealized_pnl_pct: number | null }
   | { type: 'analysis_cancelled'; ticker: string }
+  | { type: 'portfolio_reset' }
