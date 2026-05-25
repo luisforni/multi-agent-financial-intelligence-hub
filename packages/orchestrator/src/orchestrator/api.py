@@ -759,6 +759,18 @@ async def get_portfolio() -> dict[str, Any]:
     }
 
 
+@app.delete("/portfolio", tags=["Portfolio"])
+async def reset_portfolio() -> dict[str, Any]:
+    closed = list(_positions.keys())
+    _positions.clear()
+    _closed_trades.clear()
+    if _redis:
+        await _redis.delete(PORTFOLIO_KEY)
+        await _redis.delete(CLOSED_TRADES_KEY)
+    await ws_manager.broadcast({"type": "portfolio_reset"})
+    return {"action": "reset", "closed_positions": closed, "count": len(closed)}
+
+
 @app.delete("/portfolio/{ticker}", tags=["Portfolio"])
 async def close_position_manual(ticker: str = Path(...)) -> dict[str, Any]:
     ticker = ticker.upper().strip()
