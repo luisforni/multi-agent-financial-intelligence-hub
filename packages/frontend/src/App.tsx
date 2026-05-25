@@ -110,6 +110,10 @@ export default function App() {
           ? { ...p, current_price: evt.current_price, unrealized_pnl: evt.unrealized_pnl, unrealized_pnl_pct: evt.unrealized_pnl_pct }
           : p
       ))
+    } else if (evt.type === 'portfolio_reset') {
+      setPositions([])
+      setClosedTrades([])
+      setSummary(EMPTY_SUMMARY)
     }
   }, [pushFeed, refreshPortfolio, t])
 
@@ -151,8 +155,18 @@ export default function App() {
   }
 
   async function handleClearAll() {
-    try { await api.cancelAllAnalyses(); await api.clearAnalyses() } catch {}
-    setAnalyzing(new Set()); setAnalyses([]); setFeed([]); setSelectedTicker(null)
+    try {
+      await api.cancelAllAnalyses()
+      await api.clearAnalyses()
+      await api.resetPortfolio()
+    } catch {}
+    setAnalyzing(new Set())
+    setAnalyses([])
+    setFeed([])
+    setSelectedTicker(null)
+    setPositions([])
+    setClosedTrades([])
+    setSummary(EMPTY_SUMMARY)
   }
 
   async function handleClosePosition(ticker: string) {
