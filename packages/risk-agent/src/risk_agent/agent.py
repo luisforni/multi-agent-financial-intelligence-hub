@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from typing import Any
 
@@ -266,6 +267,15 @@ class RiskAgent:
 
         return {"error": f"Unknown tool: {name}"}
 
+    @staticmethod
+    def _to_list(value: Any) -> list[str]:
+        if isinstance(value, list):
+            return [str(v) for v in value if v]
+        if isinstance(value, str) and value.strip():
+            items = [re.sub(r'^\s*\d+[\.\)]\s*', '', line).strip() for line in value.splitlines()]
+            return [i for i in items if i]
+        return []
+
     def _build_recommendation(
         self,
         stock_data: StockData,
@@ -308,8 +318,8 @@ class RiskAgent:
             executive_summary=result.get("executive_summary", "Analysis pending."),
             bull_case=result.get("bull_case", ""),
             bear_case=result.get("bear_case", ""),
-            key_risks=result.get("key_risks", []),
-            key_catalysts=result.get("key_catalysts", []),
+            key_risks=self._to_list(result.get("key_risks", [])),
+            key_catalysts=self._to_list(result.get("key_catalysts", [])),
             market_data=stock_data,
             sentiment_data=sentiment_data,
             risk_metrics=risk_metrics,
