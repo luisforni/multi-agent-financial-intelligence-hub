@@ -38,6 +38,23 @@ class Settings(BaseSettings):
         alias="POSTGRES_URL",
     )
 
+    # Alpaca trading
+    alpaca_mode: str = Field("", alias="ALPACA_MODE")       # "paper" | "live" | "" (disabled)
+    alpaca_api_key: str = Field("", alias="ALPACA_API_KEY")
+    alpaca_api_secret: str = Field("", alias="ALPACA_API_SECRET")
+
+    @property
+    def alpaca_enabled(self) -> bool:
+        return bool(self.alpaca_mode and self.alpaca_api_key and self.alpaca_api_secret)
+
+    @property
+    def alpaca_base_url(self) -> str:
+        return (
+            "https://paper-api.alpaca.markets"
+            if self.alpaca_mode == "paper"
+            else "https://api.alpaca.markets"
+        )
+
     # Application
     log_level: str = Field("INFO", alias="LOG_LEVEL")
     environment: str = Field("development", alias="ENVIRONMENT")

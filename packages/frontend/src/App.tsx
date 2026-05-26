@@ -8,6 +8,7 @@ import { Watchlist } from './components/Watchlist'
 import { ActivityFeed, type FeedItem } from './components/ActivityFeed'
 import { AnalysisCard } from './components/AnalysisCard'
 import { Portfolio } from './components/Portfolio'
+import { AlpacaPanel } from './components/AlpacaPanel'
 import { TickerPanel } from './components/TickerPanel'
 import { LanguageSwitcher } from './components/LanguageSwitcher'
 
@@ -32,7 +33,7 @@ const EMPTY_SUMMARY: PortfolioSummary = {
   total_open_pnl: 0, total_realized_pnl: 0, total_pnl: 0,
 }
 
-type RightTab = 'portfolio' | 'feed'
+type RightTab = 'portfolio' | 'feed' | 'alpaca'
 
 export default function App() {
   const { t } = useTranslation()
@@ -276,7 +277,7 @@ export default function App() {
         <div className="w-[280px] shrink-0 border-l border-border flex flex-col overflow-hidden bg-panel">
           {/* Right tab bar */}
           <div className="h-[32px] shrink-0 border-b border-border flex items-stretch">
-            {(['portfolio', 'feed'] as RightTab[]).map(id => (
+            {(['portfolio', 'alpaca', 'feed'] as RightTab[]).map(id => (
               <button
                 key={id}
                 onClick={() => setRightTab(id)}
@@ -293,7 +294,7 @@ export default function App() {
                       <span className="bg-accent/20 text-accent text-[10px] px-1 rounded">{summary.open_count}</span>
                     )}
                   </>
-                ) : t('tab.feed')}
+                ) : id === 'alpaca' ? 'Alpaca' : t('tab.feed')}
               </button>
             ))}
           </div>
@@ -308,6 +309,7 @@ export default function App() {
                 onClose={handleClosePosition}
               />
             )}
+            {rightTab === 'alpaca' && <AlpacaPanel />}
             {rightTab === 'feed' && (
               <ActivityFeed items={feed} onClear={() => setFeed([])} />
             )}
@@ -318,7 +320,7 @@ export default function App() {
 
       {/* ── Status bar ───────────────────────────────────────────────────────── */}
       <div className="h-[22px] shrink-0 border-t border-border bg-panel flex items-center px-3 gap-4 text-[10px] text-muted select-none">
-        <span>Paper trading · $10k/trade</span>
+        <span>Alpaca paper · $10k/trade</span>
         <span className="ml-auto">{summary.open_count} {t('portfolio.openPositions').toLowerCase()} · {closedTrades.length} {t('portfolio.tradeHistory').toLowerCase()}</span>
       </div>
     </div>

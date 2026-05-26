@@ -26,6 +26,7 @@ from shared.models import (
     TradeDirection,
 )
 
+from orchestrator.alpaca_client import AlpacaClient
 from orchestrator.coordinator import AgentCoordinator
 from orchestrator.websocket_manager import ws_manager
 
@@ -34,6 +35,7 @@ logger = logging.getLogger(__name__)
 _coordinator: AgentCoordinator | None = None
 _message_bus: MessageBus | None = None
 _redis: aioredis.Redis | None = None
+_alpaca: AlpacaClient | None = None
 
 _recent_analyses: deque[dict[str, Any]] = deque(maxlen=50)
 
@@ -70,7 +72,7 @@ CLOSED_TRADES_KEY = "fintelligence:closed_trades"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    global _coordinator, _message_bus, _redis
+    global _coordinator, _message_bus, _redis, _alpaca
 
     settings = get_settings()
     configure_logging(settings.log_level, json_output=settings.is_production)
@@ -93,6 +95,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         _message_bus = None
 
     _coordinator = AgentCoordinator(settings, message_bus=_message_bus)
+
+    if settings.alpaca_enabled:
+        _alpaca = AlpacaClient(settings)
+        logger.info("Alpaca trading enabled (mode=%s)", settings.alpaca_mode)
+    else:
+        logger.info("Alpaca trading disabled (ALPACA_MODE not set or keys missing)")
+
     logger.info("Financial Intelligence Hub API started")
 
     scanner_task = asyncio.create_task(_scanner_listener(settings.redis_url))
@@ -214,6 +223,13 @@ async def _open_position(rec: InvestmentRecommendation) -> None:
     await _save_position(pos)
     logger.info("Opened %s position for %s @ $%.2f", direction, ticker, price)
 
+    if _alpaca:
+        try:
+            side = "buy" if direction == TradeDirection.LONG else "sell"
+            await _alpaca.submit_order(ticker, quantity, side)
+        except Exception as exc:
+            logger.error("Alpaca order failed for %s: %s", ticker, exc)
+
     await ws_manager.broadcast({
         "type": "position_opened",
         "ticker": ticker,
@@ -250,6 +266,12 @@ async def _close_position(ticker: str, exit_price: float, reason: str) -> Closed
     _closed_trades.appendleft(trade)
     await _delete_position(ticker)
     await _save_closed_trade(trade)
+
+    if _alpaca:
+        try:
+            await _alpaca.close_position(ticker)
+        except Exception as exc:
+            logger.error("Alpaca close failed for %s: %s", ticker, exc)
 
     logger.info("Closed %s for %s @ $%.2f | PnL: $%.2f (%.1f%%) [%s]",
                 pos.direction, ticker, exit_price, realized_pnl, realized_pnl_pct, reason)
@@ -786,6 +808,67 @@ async def close_position_manual(ticker: str = Path(...)) -> dict[str, Any]:
 
 # ── Health ────────────────────────────────────────────────────────────────────
 
+@app.get("/alpaca/account", tags=["Alpaca"])
+async def alpaca_account() -> dict[str, Any]:
+    if not _alpaca:
+        raise HTTPException(status_code=503, detail="Alpaca not configured (set ALPACA_MODE, ALPACA_API_KEY, ALPACA_API_SECRET in .env)")
+    try:
+        account = await _alpaca.get_account()
+        positions = await _alpaca.get_positions()
+        return {
+            "mode": _alpaca._mode,
+            "account_id": account.get("id"),
+            "status": account.get("status"),
+            "buying_power": float(account.get("buying_power", 0)),
+            "cash": float(account.get("cash", 0)),
+            "portfolio_value": float(account.get("portfolio_value", 0)),
+            "equity": float(account.get("equity", 0)),
+            "last_equity": float(account.get("last_equity", 0)),
+            "pnl_today": float(account.get("equity", 0)) - float(account.get("last_equity", 0)),
+            "open_positions": len(positions),
+            "positions": [
+                {
+                    "ticker": p["symbol"],
+                    "qty": float(p["qty"]),
+                    "side": p["side"],
+                    "entry_price": float(p["avg_entry_price"]),
+                    "current_price": float(p["current_price"]),
+                    "unrealized_pnl": float(p["unrealized_pl"]),
+                    "unrealized_pnl_pct": float(p["unrealized_plpc"]) * 100,
+                    "market_value": float(p["market_value"]),
+                }
+                for p in positions
+            ],
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Alpaca API error: {exc}")
+
+
+@app.get("/alpaca/orders", tags=["Alpaca"])
+async def alpaca_orders(status: str = "all", limit: int = 50) -> list[dict[str, Any]]:
+    if not _alpaca:
+        raise HTTPException(status_code=503, detail="Alpaca not configured")
+    try:
+        orders = await _alpaca.get_orders(status=status, limit=limit)
+        return [
+            {
+                "id": o.get("id"),
+                "ticker": o.get("symbol"),
+                "side": o.get("side"),
+                "qty": o.get("qty"),
+                "filled_qty": o.get("filled_qty"),
+                "type": o.get("type"),
+                "status": o.get("status"),
+                "filled_avg_price": o.get("filled_avg_price"),
+                "submitted_at": o.get("submitted_at"),
+                "filled_at": o.get("filled_at"),
+            }
+            for o in orders
+        ]
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Alpaca API error: {exc}")
+
+
 @app.get("/health", tags=["System"])
 async def health() -> dict[str, Any]:
     return {
@@ -794,6 +877,7 @@ async def health() -> dict[str, Any]:
         "ws_clients": ws_manager.connected_count,
         "recent_analyses": len(_recent_analyses),
         "open_positions": len(_positions),
+        "alpaca_enabled": _alpaca is not None,
     }
 
 
