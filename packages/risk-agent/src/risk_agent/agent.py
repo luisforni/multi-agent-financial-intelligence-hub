@@ -62,6 +62,7 @@ class RiskAgent:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._model = settings.risk_agent_model
+        self._fallbacks = settings.risk_agent_fallback_list
         self._completion_kwargs = get_completion_kwargs(settings, self._model)
         self._risk_scorer = RiskScorer()
         self._portfolio = PortfolioAnalyzer()
@@ -108,12 +109,15 @@ class RiskAgent:
         recommendation_result: dict[str, Any] | None = None
 
         while True:
+            completion_kwargs = {**self._completion_kwargs}
+            if self._fallbacks:
+                completion_kwargs["fallbacks"] = self._fallbacks
             response = await litellm.acompletion(
                 model=self._model,
                 max_tokens=8192,
                 messages=messages,
                 tools=RISK_TOOLS,
-                **self._completion_kwargs,
+                **completion_kwargs,
             )
 
             choice = response.choices[0]

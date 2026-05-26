@@ -99,6 +99,14 @@ export interface PortfolioSummary {
   total_open_pnl: number
   total_realized_pnl: number
   total_pnl: number
+  equity?: number
+  initial_balance?: number
+  peak_equity?: number
+  drawdown_pct?: number
+  growth_pct?: number
+  trading_paused?: boolean
+  market_open?: boolean
+  max_positions_allowed?: number
 }
 
 export type WsEvent =

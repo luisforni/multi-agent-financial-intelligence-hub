@@ -139,6 +139,26 @@ export function PortfolioModal({ positions, closedTrades, summary, onClose, onDi
               <span className={`font-bold ${summary.total_pnl >= 0 ? 'text-buy' : 'text-sell'}`}>
                 Total {summary.total_pnl >= 0 ? '+' : ''}${summary.total_pnl.toFixed(2)}
               </span>
+              {summary.equity != null && summary.initial_balance != null && (
+                <>
+                  <span className="text-muted">|</span>
+                  <span className="text-[#d1d4dc]">Equity ${summary.equity.toFixed(2)}</span>
+                  {summary.growth_pct != null && (
+                    <span className={summary.growth_pct >= 0 ? 'text-buy' : 'text-sell'}>
+                      {summary.growth_pct >= 0 ? '+' : ''}{summary.growth_pct.toFixed(1)}%
+                    </span>
+                  )}
+                  {summary.drawdown_pct != null && summary.drawdown_pct > 0.1 && (
+                    <span className="text-sell">DD {summary.drawdown_pct.toFixed(1)}%</span>
+                  )}
+                  {summary.trading_paused && (
+                    <span className="text-sell font-bold animate-pulse">PAUSADO</span>
+                  )}
+                  {summary.market_open === false && (
+                    <span className="text-muted">Mercado cerrado</span>
+                  )}
+                </>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -288,7 +308,7 @@ export function PortfolioModal({ positions, closedTrades, summary, onClose, onDi
         <div className="border-t border-border px-4 h-[32px] flex items-center gap-6 text-[10px] text-muted shrink-0">
           {tab === 'open' && (
             <>
-              <span>{positions.length} posiciones abiertas</span>
+              <span>{positions.length} posiciones abiertas{summary.max_positions_allowed != null ? ` / ${summary.max_positions_allowed} máx` : ''}</span>
               <span className={summary.total_open_pnl >= 0 ? 'text-buy' : 'text-sell'}>
                 P&L Abierto: {summary.total_open_pnl >= 0 ? '+' : ''}${summary.total_open_pnl.toFixed(2)}
               </span>
@@ -296,6 +316,9 @@ export function PortfolioModal({ positions, closedTrades, summary, onClose, onDi
                 {positions.filter(p => (p.unrealized_pnl ?? 0) > 0.01).length} en ganancia ·{' '}
                 {positions.filter(p => (p.unrealized_pnl ?? 0) < -0.01).length} en pérdida
               </span>
+              {summary.initial_balance != null && (
+                <span className="text-muted">Capital inicial ${summary.initial_balance.toFixed(0)}</span>
+              )}
             </>
           )}
           {tab === 'closed' && (

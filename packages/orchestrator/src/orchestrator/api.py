@@ -61,7 +61,10 @@ ANALYSES_KEY = "fintelligence:analyses"
 # Paper portfolio (in-memory; Redis-backed for persistence)
 _positions: dict[str, Position] = {}     # ticker → open position
 _closed_trades: deque[ClosedTrade] = deque(maxlen=200)
-POSITION_SIZE_USD = 10_000.0             # dollars per trade
+
+# Dynamic position sizing state
+_peak_equity: float = 0.0               # highest equity reached (for drawdown calc)
+_trading_paused: bool = False           # paused due to drawdown
 
 WATCHLIST_KEY = "fintelligence:watchlist"
 PORTFOLIO_KEY = "fintelligence:portfolio"
@@ -173,6 +176,55 @@ async def _save_closed_trade(trade: ClosedTrade) -> None:
         await _redis.ltrim(CLOSED_TRADES_KEY, 0, 199)
 
 
+# ── Dynamic position sizing ───────────────────────────────────────────────────
+
+def _current_equity(settings: Any) -> float:
+    realized = sum(t.realized_pnl for t in _closed_trades)
+    unrealized = sum(p.unrealized_pnl() or 0.0 for p in _positions.values())
+    return settings.initial_balance + realized + unrealized
+
+
+def _compute_position_size(settings: Any) -> float:
+    equity = _current_equity(settings)
+    return max(settings.min_position_usd, equity / max(1, len(_positions) + 1))
+
+
+def _max_positions_allowed(settings: Any) -> int:
+    equity = _current_equity(settings)
+    dynamic = int(equity / settings.min_position_usd)
+    return min(dynamic, settings.max_positions_cap)
+
+
+def _check_drawdown(settings: Any) -> bool:
+    global _peak_equity, _trading_paused
+    equity = _current_equity(settings)
+    if equity > _peak_equity:
+        _peak_equity = equity
+        if _trading_paused:
+            _trading_paused = False
+            logger.info("Drawdown recovered — trading resumed (equity=%.2f)", equity)
+    if _peak_equity > 0:
+        drawdown = (_peak_equity - equity) / _peak_equity
+        if drawdown >= settings.max_drawdown_pct and not _trading_paused:
+            _trading_paused = True
+            logger.warning(
+                "Drawdown %.1f%% >= %.1f%% — trading PAUSED (equity=%.2f peak=%.2f)",
+                drawdown * 100, settings.max_drawdown_pct * 100, equity, _peak_equity,
+            )
+    return _trading_paused
+
+
+def _is_market_open() -> bool:
+    from datetime import timezone
+    now = datetime.now(timezone.utc)
+    # NYSE: Mon–Fri 13:30–20:00 UTC
+    if now.weekday() >= 5:
+        return False
+    market_open = now.replace(hour=13, minute=30, second=0, microsecond=0)
+    market_close = now.replace(hour=20, minute=0, second=0, microsecond=0)
+    return market_open <= now <= market_close
+
+
 # ── Paper trading logic ───────────────────────────────────────────────────────
 
 async def _open_position(rec: InvestmentRecommendation) -> None:
@@ -185,8 +237,23 @@ async def _open_position(rec: InvestmentRecommendation) -> None:
     if not price:
         return
 
+    settings = get_settings()
+
+    if _check_drawdown(settings):
+        logger.info("Trading paused (drawdown protection) — skipping %s", ticker)
+        return
+
+    if settings.trading_hours_only and not _is_market_open():
+        logger.debug("Outside market hours — skipping position for %s", ticker)
+        return
+
+    if len(_positions) >= _max_positions_allowed(settings):
+        logger.info("Max positions reached (%d) — skipping %s", len(_positions), ticker)
+        return
+
+    position_size = _compute_position_size(settings)
     direction = TradeDirection.LONG if rec.signal in (Signal.BUY, Signal.STRONG_BUY) else TradeDirection.SHORT
-    quantity = round(POSITION_SIZE_USD / price, 4)
+    quantity = round(position_size / price, 4)
 
     # Validate stop_loss — LLMs sometimes return wrong-direction values
     stop_loss = rec.stop_loss
@@ -768,6 +835,13 @@ async def get_portfolio() -> dict[str, Any]:
     )
     total_realized_pnl = sum(t.realized_pnl for t in _closed_trades)
 
+    settings = get_settings()
+    equity = _current_equity(settings)
+    initial = settings.initial_balance
+    drawdown_pct = round((_peak_equity - equity) / _peak_equity * 100, 2) if _peak_equity > 0 else 0.0
+    growth_pct = round((equity - initial) / initial * 100, 2) if initial > 0 else 0.0
+    max_positions = _max_positions_allowed(settings)
+
     return {
         "open_positions": open_positions,
         "closed_trades": closed,
@@ -777,6 +851,14 @@ async def get_portfolio() -> dict[str, Any]:
             "total_open_pnl": round(total_open_pnl, 2),
             "total_realized_pnl": round(total_realized_pnl, 2),
             "total_pnl": round(total_open_pnl + total_realized_pnl, 2),
+            "equity": round(equity, 2),
+            "initial_balance": round(initial, 2),
+            "peak_equity": round(_peak_equity, 2),
+            "drawdown_pct": drawdown_pct,
+            "growth_pct": growth_pct,
+            "trading_paused": _trading_paused,
+            "market_open": _is_market_open(),
+            "max_positions_allowed": max_positions,
         },
     }
 

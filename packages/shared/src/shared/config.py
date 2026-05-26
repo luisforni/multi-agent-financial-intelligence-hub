@@ -80,6 +80,18 @@ class Settings(BaseSettings):
     market_data_agent_model: str = Field("ollama/llama3.2", alias="MARKET_DATA_AGENT_MODEL")
     sentiment_agent_model: str = Field("ollama/llama3.2", alias="SENTIMENT_AGENT_MODEL")
     risk_agent_model: str = Field("ollama/llama3.2", alias="RISK_AGENT_MODEL")
+    risk_agent_fallbacks: str = Field("", alias="RISK_AGENT_FALLBACKS")  # comma-separated
+
+    @property
+    def risk_agent_fallback_list(self) -> list[str]:
+        return [m.strip() for m in self.risk_agent_fallbacks.split(",") if m.strip()]
+
+    # Portfolio & risk management
+    initial_balance: float = Field(10_000.0, alias="INITIAL_BALANCE")
+    min_position_usd: float = Field(100.0, alias="MIN_POSITION_USD")
+    max_positions_cap: int = Field(50, alias="MAX_POSITIONS_CAP")
+    max_drawdown_pct: float = Field(0.20, alias="MAX_DRAWDOWN_PCT")
+    trading_hours_only: bool = Field(False, alias="TRADING_HOURS_ONLY")
 
     @property
     def is_production(self) -> bool:
