@@ -117,6 +117,7 @@ class RiskAgent:
                 max_tokens=8192,
                 messages=messages,
                 tools=RISK_TOOLS,
+                parallel_tool_calls=False,
                 **completion_kwargs,
             )
 
