@@ -43,14 +43,28 @@ function PnlCell({ value, pct }: { value: number | null; pct: number | null }) {
   )
 }
 
-function rowBg(pnl: number | null) {
-  if (pnl === null || Math.abs(pnl) < 0.01) return ''
-  return pnl > 0 ? 'bg-buy/5 border-l-2 border-l-buy' : 'bg-sell/5 border-l-2 border-l-sell'
+function rowStyle(pnl: number | null, maxAbs: number): React.CSSProperties {
+  if (pnl === null || Math.abs(pnl) < 0.01 || maxAbs === 0) return {}
+  const intensity = Math.min(0.22, 0.05 + (Math.abs(pnl) / maxAbs) * 0.17)
+  const color = pnl > 0 ? `rgba(38,166,154,${intensity})` : `rgba(239,83,80,${intensity})`
+  const border = pnl > 0 ? '#26a69a' : '#ef5350'
+  return { backgroundColor: color, borderLeft: `2px solid ${border}` }
 }
 
 export function PortfolioModal({ positions, closedTrades, summary, onClose, onDismiss }: Props) {
   const { t } = useTranslation()
   const [tab, setTab] = useState<Tab>('open')
+
+  const sortedPositions = [...positions].sort((a, b) => (b.unrealized_pnl ?? 0) - (a.unrealized_pnl ?? 0))
+  const sortedTrades = [...closedTrades].sort((a, b) => {
+    const group = (pnl: number) => pnl > 0.01 ? 0 : pnl < -0.01 ? 1 : 2
+    const ga = group(a.realized_pnl), gb = group(b.realized_pnl)
+    if (ga !== gb) return ga - gb
+    return b.realized_pnl - a.realized_pnl
+  })
+
+  const maxOpenAbs = Math.max(...positions.map(p => Math.abs(p.unrealized_pnl ?? 0)), 0.01)
+  const maxClosedAbs = Math.max(...closedTrades.map(t => Math.abs(t.realized_pnl)), 0.01)
 
   return (
     <div
@@ -119,8 +133,8 @@ export function PortfolioModal({ positions, closedTrades, summary, onClose, onDi
                 {positions.length === 0 && (
                   <tr><td colSpan={10} className="text-center py-8 text-muted">{t('portfolio.noPositions')}</td></tr>
                 )}
-                {positions.map(p => (
-                  <tr key={p.ticker} className={`border-b border-border/30 hover:bg-panel2/40 ${rowBg(p.unrealized_pnl)}`}>
+                {sortedPositions.map(p => (
+                  <tr key={p.ticker} className="border-b border-border/30 hover:bg-panel2/40" style={rowStyle(p.unrealized_pnl, maxOpenAbs)}>
                     <td className="px-3 py-2">
                       <div className="font-bold font-mono text-[#d1d4dc]">{p.ticker}</div>
                       <div className="text-[10px] text-muted truncate max-w-[100px]">{p.company_name}</div>
@@ -181,8 +195,8 @@ export function PortfolioModal({ positions, closedTrades, summary, onClose, onDi
                 {closedTrades.length === 0 && (
                   <tr><td colSpan={8} className="text-center py-8 text-muted">Sin trades cerrados</td></tr>
                 )}
-                {[...closedTrades].reverse().map((trade, i) => (
-                  <tr key={i} className={`border-b border-border/30 hover:bg-panel2/40 ${rowBg(trade.realized_pnl)}`}>
+                {sortedTrades.map((trade, i) => (
+                  <tr key={i} className="border-b border-border/30 hover:bg-panel2/40" style={rowStyle(trade.realized_pnl, maxClosedAbs)}>
                     <td className="px-3 py-2">
                       <div className="font-bold font-mono text-[#d1d4dc]">{trade.ticker}</div>
                       <div className="text-[10px] text-muted truncate max-w-[100px]">{trade.company_name}</div>
