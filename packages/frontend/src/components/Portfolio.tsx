@@ -1,6 +1,8 @@
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { TrendingUp, TrendingDown, X, DollarSign } from 'lucide-react'
+import { TrendingUp, TrendingDown, X, DollarSign, Maximize2 } from 'lucide-react'
 import type { OpenPosition, ClosedTrade, PortfolioSummary } from '../types'
+import { PortfolioModal } from './PortfolioModal'
 
 interface Props {
   positions: OpenPosition[]
@@ -42,9 +44,30 @@ function ExitReasonBadge({ reason }: { reason: string }) {
 export function Portfolio({ positions, closedTrades, summary, onClose }: Props) {
   const { t } = useTranslation()
   const allFlat = summary.total_pnl === 0 && positions.length > 0
+  const [showModal, setShowModal] = useState(false)
 
   return (
     <div className="flex flex-col">
+      {showModal && (
+        <PortfolioModal
+          positions={positions}
+          closedTrades={closedTrades}
+          summary={summary}
+          onClose={(ticker) => { onClose(ticker) }}
+          onDismiss={() => setShowModal(false)}
+        />
+      )}
+      {/* Expand button */}
+      <div className="flex items-center justify-end px-3 py-1 border-b border-border">
+        <button
+          onClick={() => setShowModal(true)}
+          className="flex items-center gap-1 text-[10px] text-muted hover:text-[#d1d4dc] transition-colors"
+          title="Ver detalle completo"
+        >
+          <Maximize2 size={10} /> Ver detalle
+        </button>
+      </div>
+
       {/* Summary strip */}
       <div className="grid grid-cols-3 border-b border-border">
         {([
