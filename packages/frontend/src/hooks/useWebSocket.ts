@@ -1,7 +1,8 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import type { WsEvent } from '../types'
 
-const WS_URL = (import.meta.env.VITE_WS_URL as string | undefined) || `ws://${window.location.host}`
+const WS_URL = (import.meta.env.VITE_WS_URL as string | undefined) ||
+  `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`
 
 export function useWebSocket(onEvent: (evt: WsEvent) => void) {
   const wsRef = useRef<WebSocket | null>(null)

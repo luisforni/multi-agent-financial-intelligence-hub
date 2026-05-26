@@ -789,6 +789,15 @@ async def reset_portfolio() -> dict[str, Any]:
     if _redis:
         await _redis.delete(PORTFOLIO_KEY)
         await _redis.delete(CLOSED_TRADES_KEY)
+
+    # Close ALL positions in Alpaca too (including those from previous runs)
+    if _alpaca:
+        try:
+            await _alpaca.close_all_positions()
+            logger.info("Alpaca reset: all positions closed")
+        except Exception as exc:
+            logger.error("Alpaca reset: bulk close failed: %s", exc)
+
     await ws_manager.broadcast({"type": "portfolio_reset"})
     return {"action": "reset", "closed_positions": closed, "count": len(closed)}
 

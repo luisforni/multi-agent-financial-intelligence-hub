@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { X } from 'lucide-react'
+import { X, Download } from 'lucide-react'
 import type { OpenPosition, ClosedTrade, PortfolioSummary } from '../types'
 
 interface Props {
@@ -51,9 +51,59 @@ function rowStyle(pnl: number | null, maxAbs: number): React.CSSProperties {
   return { backgroundColor: color, borderLeft: `2px solid ${border}` }
 }
 
+function downloadCSV(filename: string, rows: string[][], headers: string[]) {
+  const escape = (v: string) => `"${v.replace(/"/g, '""')}"`
+  const lines = [headers.map(escape).join(','), ...rows.map(r => r.map(escape).join(','))]
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 export function PortfolioModal({ positions, closedTrades, summary, onClose, onDismiss }: Props) {
   const { t } = useTranslation()
   const [tab, setTab] = useState<Tab>('open')
+
+  function handleDownload() {
+    const ts = new Date().toISOString().slice(0, 10)
+    if (tab === 'open') {
+      const headers = ['Ticker', 'Empresa', 'Dirección', 'Señal', 'Apertura', 'Entrada $', 'Actual $', 'Stop $', 'Target $', 'Cantidad', 'P&L $', 'P&L %']
+      const rows = sortedPositions.map(p => [
+        p.ticker,
+        p.company_name,
+        p.direction,
+        p.signal,
+        p.entry_time,
+        p.entry_price.toFixed(2),
+        p.current_price?.toFixed(2) ?? '',
+        p.stop_loss?.toFixed(2) ?? '',
+        p.target_price?.toFixed(2) ?? '',
+        p.quantity.toFixed(4),
+        (p.unrealized_pnl ?? 0).toFixed(2),
+        (p.unrealized_pnl_pct ?? 0).toFixed(2),
+      ])
+      downloadCSV(`portfolio_abiertas_${ts}.csv`, rows, headers)
+    } else {
+      const headers = ['Ticker', 'Empresa', 'Dirección', 'Apertura', 'Cierre', 'Entrada $', 'Salida $', 'Cantidad', 'P&L $', 'P&L %', 'Motivo']
+      const rows = sortedTrades.map(t => [
+        t.ticker,
+        t.company_name,
+        t.direction,
+        t.entry_time,
+        t.exit_time,
+        t.entry_price.toFixed(2),
+        t.exit_price.toFixed(2),
+        t.quantity.toFixed(4),
+        t.realized_pnl.toFixed(2),
+        t.realized_pnl_pct.toFixed(2),
+        t.exit_reason,
+      ])
+      downloadCSV(`portfolio_historial_${ts}.csv`, rows, headers)
+    }
+  }
 
   const sortedPositions = [...positions].sort((a, b) => (b.unrealized_pnl ?? 0) - (a.unrealized_pnl ?? 0))
   const sortedTrades = [...closedTrades].sort((a, b) => {
@@ -91,9 +141,18 @@ export function PortfolioModal({ positions, closedTrades, summary, onClose, onDi
               </span>
             </div>
           </div>
-          <button onClick={onDismiss} className="text-muted hover:text-[#d1d4dc] transition-colors">
-            <X size={14} />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleDownload}
+              className="flex items-center gap-1 text-muted hover:text-[#d1d4dc] transition-colors text-[10px] border border-border px-2 py-px hover:border-accent/50"
+              title="Descargar CSV"
+            >
+              <Download size={10} /> CSV
+            </button>
+            <button onClick={onDismiss} className="text-muted hover:text-[#d1d4dc] transition-colors">
+              <X size={14} />
+            </button>
+          </div>
         </div>
 
         {/* Tabs */}
