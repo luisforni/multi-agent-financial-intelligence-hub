@@ -49,6 +49,7 @@ class SentimentAgent:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._model = settings.sentiment_agent_model
+        self._fallbacks = settings.sentiment_agent_fallback_list
         self._completion_kwargs = get_completion_kwargs(settings, self._model)
         self._reddit = RedditScraper(
             client_id=settings.reddit_client_id,
@@ -90,12 +91,16 @@ class SentimentAgent:
         analysis_result: dict[str, Any] | None = None
 
         while True:
+            completion_kwargs = {**self._completion_kwargs}
+            if self._fallbacks:
+                completion_kwargs["fallbacks"] = self._fallbacks
             response = await litellm.acompletion(
                 model=self._model,
                 max_tokens=4096,
                 messages=messages,
                 tools=SENTIMENT_TOOLS,
-                **self._completion_kwargs,
+                parallel_tool_calls=False,
+                **completion_kwargs,
             )
 
             choice = response.choices[0]

@@ -78,9 +78,19 @@ class Settings(BaseSettings):
     #   Groq:       groq/llama-3.3-70b-versatile  groq/mixtral-8x7b-32768
     #   Mistral:    mistral/mistral-large-latest  mistral/mistral-small-latest
     market_data_agent_model: str = Field("ollama/llama3.2", alias="MARKET_DATA_AGENT_MODEL")
+    market_data_agent_fallbacks: str = Field("", alias="MARKET_DATA_AGENT_FALLBACKS")
     sentiment_agent_model: str = Field("ollama/llama3.2", alias="SENTIMENT_AGENT_MODEL")
+    sentiment_agent_fallbacks: str = Field("", alias="SENTIMENT_AGENT_FALLBACKS")
     risk_agent_model: str = Field("ollama/llama3.2:1b", alias="RISK_AGENT_MODEL")
-    risk_agent_fallbacks: str = Field("", alias="RISK_AGENT_FALLBACKS")  # comma-separated
+    risk_agent_fallbacks: str = Field("", alias="RISK_AGENT_FALLBACKS")
+
+    @property
+    def market_data_agent_fallback_list(self) -> list[str]:
+        return [m.strip() for m in self.market_data_agent_fallbacks.split(",") if m.strip()]
+
+    @property
+    def sentiment_agent_fallback_list(self) -> list[str]:
+        return [m.strip() for m in self.sentiment_agent_fallbacks.split(",") if m.strip()]
 
     @property
     def risk_agent_fallback_list(self) -> list[str]:

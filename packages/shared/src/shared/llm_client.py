@@ -16,7 +16,7 @@ def get_completion_kwargs(settings: Settings, model: str) -> dict[str, Any]:
 
     if model.startswith("ollama/"):
         kwargs["api_base"] = settings.llm_base_url
-        kwargs["request_timeout"] = 90
+        kwargs["request_timeout"] = 240
     elif model.startswith("gemini/"):
         if settings.gemini_api_key:
             kwargs["api_key"] = settings.gemini_api_key

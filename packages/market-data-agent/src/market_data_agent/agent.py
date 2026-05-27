@@ -46,6 +46,7 @@ class MarketDataAgent:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._model = settings.market_data_agent_model
+        self._fallbacks = settings.market_data_agent_fallback_list
         self._completion_kwargs = get_completion_kwargs(settings, self._model)
         self._yf_provider = YahooFinanceProvider()
         self._av_provider = (
@@ -85,12 +86,16 @@ class MarketDataAgent:
         analysis_result: dict[str, Any] | None = None
 
         while True:
+            completion_kwargs = {**self._completion_kwargs}
+            if self._fallbacks:
+                completion_kwargs["fallbacks"] = self._fallbacks
             response = await litellm.acompletion(
                 model=self._model,
                 max_tokens=4096,
                 messages=messages,
                 tools=MARKET_DATA_TOOLS,
-                **self._completion_kwargs,
+                parallel_tool_calls=False,
+                **completion_kwargs,
             )
 
             choice = response.choices[0]
