@@ -108,8 +108,11 @@ export interface PortfolioSummary {
   market_open?: boolean
   max_positions_allowed?: number
   day_trades_in_window?: number
+  day_trades_remaining?: number
+  pdt_min_confidence?: number
   unsettled_cash?: number
   slippage_pct?: number
+  next_position_size?: number
 }
 
 export type WsEvent =

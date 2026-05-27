@@ -47,6 +47,12 @@ ANALYSIS_COOLDOWN_SECONDS = 1800  # 30 minutes
 # Active analysis tasks: ticker → asyncio.Task (for cancellation)
 _active_tasks: dict[str, asyncio.Task[None]] = {}
 
+# PDT conviction thresholds: minimum confidence required to open a position.
+# As the weekly day-trade budget shrinks, the bar rises to protect the remaining slots
+# from low-probability setups (which are more likely to hit stop-loss same day).
+_PDT_CONFIDENCE_NORMAL = 0.60    # ≥2 slots remaining: standard signal quality
+_PDT_CONFIDENCE_CAUTIOUS = 0.75  # 1 slot remaining: require strong conviction
+
 # Circuit breaker: consecutive LLM failures → pause scanner auto-analysis
 _consecutive_llm_failures = 0
 _LLM_FAILURE_THRESHOLD = 3   # pause after this many back-to-back failures
@@ -469,10 +475,26 @@ async def _open_position(rec: InvestmentRecommendation) -> None:
         logger.info("Max positions reached (%d) — skipping %s", len(_positions), ticker)
         return
 
-    # PDT guard: block if at the 3-day-trade limit in the rolling 5-business-day window
+    # PDT conviction filter: tighten minimum confidence as day-trade budget depletes.
+    # A new open only becomes a day trade if closed the same day; min_hold_days=1
+    # prevents signal reversals, but stop-loss can still trigger same-day.
+    # Requiring higher confidence when budget is tight reduces that stop-loss risk.
     dt_count = _day_trades_in_window()
-    if dt_count >= settings.max_day_trades:
-        logger.warning("PDT limit reached (%d day trades in 5d) — skipping %s", dt_count, ticker)
+    dt_remaining = settings.max_day_trades - dt_count
+    if dt_remaining <= 0:
+        logger.warning(
+            "PDT limit reached (%d/%d day trades this week) — skipping %s",
+            dt_count, settings.max_day_trades, ticker,
+        )
+        return
+    required_conf = _PDT_CONFIDENCE_CAUTIOUS if dt_remaining == 1 else _PDT_CONFIDENCE_NORMAL
+    if rec.confidence < required_conf:
+        logger.info(
+            "PDT filter: skipping %s — confidence %.0f%% < %.0f%% required "
+            "(%d/%d day trades used, %d slot remaining)",
+            ticker, rec.confidence * 100, required_conf * 100,
+            dt_count, settings.max_day_trades, dt_remaining,
+        )
         return
 
     # Settled cash guard: don't open positions with unsettled T+2 funds
@@ -523,7 +545,15 @@ async def _open_position(rec: InvestmentRecommendation) -> None:
     )
     _positions[ticker] = pos
     await _save_position(pos)
-    logger.info("Opened %s position for %s @ $%.4f (slippage from $%.2f)", direction, ticker, entry_price, price)
+    equity_now = _current_equity(settings)
+    compound_growth = (equity_now - settings.initial_balance) / settings.initial_balance * 100
+    logger.info(
+        "Opened %s for %s @ $%.4f | equity $%.2f (%+.1f%%) | position $%.2f "
+        "| conf %.0f%% | PDT %d/%d",
+        direction, ticker, entry_price,
+        equity_now, compound_growth, position_size,
+        rec.confidence * 100, dt_count, settings.max_day_trades,
+    )
 
     if _alpaca:
         try:
@@ -1121,6 +1151,10 @@ async def get_portfolio() -> dict[str, Any]:
     drawdown_pct = round((_peak_equity - equity) / _peak_equity * 100, 2) if _peak_equity > 0 else 0.0
     growth_pct = round((equity - initial) / initial * 100, 2) if initial > 0 else 0.0
     max_positions = _max_positions_allowed(settings)
+    dt_used = _day_trades_in_window()
+    dt_remaining = max(0, settings.max_day_trades - dt_used)
+    pdt_min_conf = _PDT_CONFIDENCE_CAUTIOUS if dt_remaining <= 1 else _PDT_CONFIDENCE_NORMAL
+    next_position_size = round(min(_compute_position_size(settings), equity), 2)
 
     return {
         "open_positions": open_positions,
@@ -1139,9 +1173,12 @@ async def get_portfolio() -> dict[str, Any]:
             "trading_paused": _trading_paused,
             "market_open": _is_market_open(),
             "max_positions_allowed": max_positions,
-            "day_trades_in_window": _day_trades_in_window(),
+            "day_trades_in_window": dt_used,
+            "day_trades_remaining": dt_remaining,
+            "pdt_min_confidence": round(pdt_min_conf, 2),
             "unsettled_cash": round(_unsettled_amount(), 2),
             "slippage_pct": settings.slippage_pct,
+            "next_position_size": next_position_size,
         },
     }
 

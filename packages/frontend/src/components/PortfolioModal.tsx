@@ -319,6 +319,14 @@ export function PortfolioModal({ positions, closedTrades, summary, onClose, onDi
               {summary.initial_balance != null && (
                 <span className="text-muted">Capital inicial ${summary.initial_balance.toFixed(0)}</span>
               )}
+              {summary.day_trades_remaining != null && summary.day_trades_in_window != null && (
+                <span className={summary.day_trades_remaining === 0 ? 'text-sell font-bold' : summary.day_trades_remaining === 1 ? 'text-yellow-400' : 'text-muted'}>
+                  PDT {summary.day_trades_in_window}/{(summary.day_trades_in_window ?? 0) + summary.day_trades_remaining} · conf min {summary.pdt_min_confidence != null ? `${Math.round(summary.pdt_min_confidence * 100)}%` : '—'}
+                </span>
+              )}
+              {summary.next_position_size != null && (
+                <span className="text-muted">Próx. pos. ${summary.next_position_size.toFixed(0)}</span>
+              )}
             </>
           )}
           {tab === 'closed' && (
