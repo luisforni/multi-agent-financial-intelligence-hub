@@ -8,7 +8,7 @@ from typing import Any
 from shared.config import Settings
 from shared.events import EventType, RecommendationEvent
 from shared.message_bus import MessageBus
-from shared.models import ChartAnalysis, InvestmentRecommendation
+from shared.models import ChartAnalysis, InvestmentRecommendation, SentimentData
 
 from market_data_agent.agent import MarketDataAgent
 from sentiment_agent.agent import SentimentAgent
@@ -44,10 +44,17 @@ class AgentCoordinator:
         self._risk_agent = RiskAgent(settings)
         self._chart_agent = ChartVisionAgent(settings)
 
-    async def analyze(self, ticker: str, on_progress=None) -> InvestmentRecommendation:
+    async def analyze(
+        self,
+        ticker: str,
+        on_progress=None,
+        cached_sentiment: SentimentData | None = None,
+    ) -> InvestmentRecommendation:
         """
         on_progress: optional async callable(step: str, message: str) called as each
         agent completes so the caller can broadcast intermediate WebSocket events.
+        cached_sentiment: when provided (market-hours fast path), skip the sentiment
+        agent and use this pre-computed data instead, running only market-data + chart.
         """
         ticker = ticker.upper().strip()
         workflow = WorkflowState(ticker=ticker)
@@ -55,7 +62,11 @@ class AgentCoordinator:
 
         logger.info(
             "Starting multi-agent analysis",
-            extra={"ticker": ticker, "workflow_id": workflow.workflow_id},
+            extra={
+                "ticker": ticker,
+                "workflow_id": workflow.workflow_id,
+                "fast_path": cached_sentiment is not None,
+            },
         )
 
         async def _step(coro, step: str, summarize):
@@ -68,21 +79,49 @@ class AgentCoordinator:
             return result
 
         try:
-            # Stage 1: Parallel data gathering (market data + sentiment + chart)
-            market_data, sentiment_data, chart_analysis = await asyncio.gather(
-                asyncio.create_task(
-                    _step(
-                        self._market_agent.analyze(ticker),
-                        "market_data",
-                        lambda r: (
-                            f"${r.current_price:.2f}"
-                            + (f" · RSI {r.technicals.rsi_14:.0f}" if r.technicals and r.technicals.rsi_14 else "")
-                            + (f" · {r.technical_summary[:80]}" if r.technical_summary else "")
-                        ),
+            # Stage 1: Parallel data gathering
+            market_task = asyncio.create_task(
+                _step(
+                    self._market_agent.analyze(ticker),
+                    "market_data",
+                    lambda r: (
+                        f"${r.current_price:.2f}"
+                        + (f" · RSI {r.technicals.rsi_14:.0f}" if r.technicals and r.technicals.rsi_14 else "")
+                        + (f" · {r.technical_summary[:80]}" if r.technical_summary else "")
                     ),
-                    name=f"market-{ticker}",
                 ),
-                asyncio.create_task(
+                name=f"market-{ticker}",
+            )
+            chart_task = asyncio.create_task(
+                _step(
+                    self._chart_agent.analyze(ticker),
+                    "chart",
+                    lambda r: (
+                        (f"{r.trend}" if r.trend else "no trend")
+                        + (f" · {r.chart_signal}" if r.chart_signal else "")
+                        + (f" · patterns: {', '.join(p.name for p in r.patterns[:3])}" if r.patterns else " · no patterns")
+                    ),
+                ),
+                name=f"chart-{ticker}",
+            )
+
+            if cached_sentiment is not None:
+                # Fast path (market hours): market-data + chart only, reuse cached sentiment
+                market_data, chart_analysis = await asyncio.gather(market_task, chart_task)
+                sentiment_data = cached_sentiment
+                if on_progress:
+                    try:
+                        score = cached_sentiment.overall_score
+                        await on_progress(
+                            "sentiment",
+                            f"cached · {cached_sentiment.label}"
+                            + (f" · score {score:+.2f}" if score is not None else ""),
+                        )
+                    except Exception:
+                        pass
+            else:
+                # Full path (overnight / fallback): market-data + sentiment + chart in parallel
+                sentiment_task = asyncio.create_task(
                     _step(
                         self._run_sentiment(ticker),
                         "sentiment",
@@ -93,20 +132,11 @@ class AgentCoordinator:
                         ),
                     ),
                     name=f"sentiment-{ticker}",
-                ),
-                asyncio.create_task(
-                    _step(
-                        self._chart_agent.analyze(ticker),
-                        "chart",
-                        lambda r: (
-                            (f"{r.trend}" if r.trend else "no trend")
-                            + (f" · {r.chart_signal}" if r.chart_signal else "")
-                            + (f" · patterns: {', '.join(p.name for p in r.patterns[:3])}" if r.patterns else " · no patterns")
-                        ),
-                    ),
-                    name=f"chart-{ticker}",
-                ),
-            )
+                )
+                market_data, sentiment_data, chart_analysis = await asyncio.gather(
+                    market_task, sentiment_task, chart_task
+                )
+
             workflow.mark_step("market_data")
             workflow.mark_step("sentiment")
             workflow.mark_step("chart_analysis")
@@ -119,6 +149,7 @@ class AgentCoordinator:
                     "sentiment_label": sentiment_data.label,
                     "chart_signal": chart_analysis.chart_signal,
                     "chart_trend": chart_analysis.trend,
+                    "sentiment_cached": cached_sentiment is not None,
                 },
             )
 

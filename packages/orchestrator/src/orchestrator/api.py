@@ -22,6 +22,7 @@ from shared.models import (
     InvestmentRecommendation,
     Position,
     ScannerAlert,
+    SentimentData,
     Signal,
     TradeDirection,
 )
@@ -56,6 +57,16 @@ _LLM_PAUSE_SECONDS = 300     # 5-minute pause before retrying
 _scan_queue: asyncio.Queue[str] = asyncio.Queue()
 _scan_queued: set[str] = set()  # dedup: avoid queuing the same ticker twice
 
+# Scanner scores per ticker (updated on every alert, used to prioritise overnight queue)
+_scanner_scores: dict[str, float] = {}
+
+# Sentiment cache: ticker → (SentimentData, unix timestamp)
+# Valid for SENTIMENT_CACHE_TTL seconds; used as fast-path input during market hours
+_sentiment_cache: dict[str, tuple[SentimentData, float]] = {}
+SENTIMENT_CACHE_TTL = 86400        # 24 h — covers overnight + full trading day
+OVERNIGHT_TICKER_COOLDOWN = 21600  # 6 h — minimum gap between overnight re-analyses
+SENTIMENT_CACHE_KEY = "fintelligence:sentiment_cache"
+
 ANALYSES_KEY = "fintelligence:analyses"
 
 # Paper portfolio (in-memory; Redis-backed for persistence)
@@ -73,6 +84,106 @@ _unsettled: list[tuple[Any, float]] = [] # (settle_date, amount) for T+2 settlem
 WATCHLIST_KEY = "fintelligence:watchlist"
 PORTFOLIO_KEY = "fintelligence:portfolio"
 CLOSED_TRADES_KEY = "fintelligence:closed_trades"
+
+
+# ── Sentiment cache ───────────────────────────────────────────────────────────
+
+async def _save_sentiment_cache(ticker: str, sentiment: SentimentData) -> None:
+    ts = time.time()
+    _sentiment_cache[ticker] = (sentiment, ts)
+    if _redis:
+        blob = json.dumps({"data": json.loads(sentiment.model_dump_json()), "ts": ts})
+        await _redis.hset(SENTIMENT_CACHE_KEY, ticker, blob)
+
+
+def _get_cached_sentiment(ticker: str) -> SentimentData | None:
+    entry = _sentiment_cache.get(ticker)
+    if entry is None:
+        return None
+    sentiment, ts = entry
+    if time.time() - ts > SENTIMENT_CACHE_TTL:
+        _sentiment_cache.pop(ticker, None)
+        return None
+    return sentiment
+
+
+async def _load_sentiment_cache_from_redis() -> None:
+    if not _redis:
+        return
+    raw = await _redis.hgetall(SENTIMENT_CACHE_KEY)
+    now = time.time()
+    loaded = 0
+    for ticker, blob in raw.items():
+        try:
+            obj = json.loads(blob)
+            if now - obj["ts"] < SENTIMENT_CACHE_TTL:
+                _sentiment_cache[ticker] = (SentimentData.model_validate(obj["data"]), obj["ts"])
+                loaded += 1
+        except Exception:
+            pass
+    logger.info("Sentiment cache loaded from Redis: %d valid entries", loaded)
+
+
+# ── Overnight batch analyzer ──────────────────────────────────────────────────
+
+async def _overnight_analyzer() -> None:
+    """
+    While the market is closed, run full analysis (including sentiment) for every
+    watchlist ticker ordered by latest scanner score.  Results are stored in the
+    sentiment cache so that market-hours analyses can skip the slow LLM sentiment
+    call and use pre-computed data instead.
+    """
+    try:
+        while True:
+            if _is_market_open():
+                await asyncio.sleep(60)
+                continue
+
+            if not _redis or not _coordinator:
+                await asyncio.sleep(600)
+                continue
+
+            tickers = list(await _redis.smembers(WATCHLIST_KEY))
+            if not tickers:
+                await asyncio.sleep(600)
+                continue
+
+            # Sort highest scanner score first (most likely to trigger at open)
+            tickers.sort(key=lambda t: _scanner_scores.get(t, 0.0), reverse=True)
+
+            to_analyze = [
+                t for t in tickers
+                if time.monotonic() - _last_analysis_time.get(t, 0) >= OVERNIGHT_TICKER_COOLDOWN
+                and t not in _scan_queued
+                and t not in _active_tasks
+            ]
+
+            if not to_analyze:
+                await asyncio.sleep(1800)  # all tickers fresh — check again in 30 min
+                continue
+
+            logger.info(
+                "Overnight analysis: queuing %d tickers (top: %s)",
+                len(to_analyze),
+                ", ".join(f"{t}({_scanner_scores.get(t, 0):.2f})" for t in to_analyze[:5]),
+            )
+
+            for ticker in to_analyze:
+                if _is_market_open():
+                    logger.info("Market opened — stopping overnight batch")
+                    break
+                if ticker not in _scan_queued and ticker not in _active_tasks:
+                    _scan_queued.add(ticker)
+                    _last_analysis_time[ticker] = time.monotonic()
+                    await _scan_queue.put(ticker)
+
+            # Wait for the queued batch to finish before sleeping
+            await _scan_queue.join()
+            logger.info("Overnight analysis pass complete")
+            await asyncio.sleep(1800)
+
+    except asyncio.CancelledError:
+        pass
 
 
 # ── Alpaca sync ───────────────────────────────────────────────────────────────
@@ -151,6 +262,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("Redis connected")
         await _load_portfolio_from_redis()
         await _load_analyses_from_redis()
+        await _load_sentiment_cache_from_redis()
     except Exception as exc:
         logger.warning("Redis unavailable: %s", exc)
         _redis = None
@@ -176,12 +288,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     scanner_task = asyncio.create_task(_scanner_listener(settings.redis_url))
     price_task = asyncio.create_task(_price_monitor())
     queue_task = asyncio.create_task(_scan_queue_worker())
+    overnight_task = asyncio.create_task(_overnight_analyzer())
 
     yield
 
     scanner_task.cancel()
     price_task.cancel()
     queue_task.cancel()
+    overnight_task.cancel()
     if _coordinator:
         await _coordinator.close()
     if _message_bus:
@@ -639,6 +753,7 @@ async def _scanner_listener(redis_url: str) -> None:
                         try:
                             payload = json.loads(fields.get("data", "{}"))
                             alert = ScannerAlert(**payload)
+                            _scanner_scores[alert.ticker] = alert.combined_score
                             await ws_manager.broadcast({
                                 "type": "scanner_alert",
                                 "ticker": alert.ticker,
@@ -710,7 +825,19 @@ async def _auto_analyze(ticker: str) -> None:
     progress_cb = await _make_progress_cb(ticker)
     try:
         await ws_manager.broadcast({"type": "analysis_started", "ticker": ticker})
-        rec = await _coordinator.analyze(ticker, on_progress=progress_cb)
+
+        market_open = _is_market_open()
+        cached = _get_cached_sentiment(ticker) if market_open else None
+        if market_open and cached is not None:
+            age_h = round((time.time() - _sentiment_cache[ticker][1]) / 3600, 1)
+            logger.info("Fast path for %s — cached sentiment %sh old", ticker, age_h)
+
+        rec = await _coordinator.analyze(ticker, on_progress=progress_cb, cached_sentiment=cached)
+
+        # Cache sentiment after overnight full-pipeline runs
+        if not market_open and rec.sentiment_data:
+            await _save_sentiment_cache(ticker, rec.sentiment_data)
+
         _consecutive_llm_failures = 0  # reset circuit breaker on success
         summary = _rec_to_dict(rec)
         _recent_analyses.appendleft(summary)
