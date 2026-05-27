@@ -6,7 +6,7 @@ import uuid
 from typing import Any
 
 from shared.config import Settings
-from shared.events import AnalysisRequestedEvent, EventType, RecommendationEvent
+from shared.events import EventType, RecommendationEvent
 from shared.message_bus import MessageBus
 from shared.models import ChartAnalysis, InvestmentRecommendation
 
@@ -68,14 +68,6 @@ class AgentCoordinator:
             return result
 
         try:
-            if self._bus:
-                await self._bus.publish(
-                    AnalysisRequestedEvent(
-                        correlation_id=workflow.workflow_id,
-                        ticker=ticker,
-                    )
-                )
-
             # Stage 1: Parallel data gathering (market data + sentiment + chart)
             market_data, sentiment_data, chart_analysis = await asyncio.gather(
                 asyncio.create_task(

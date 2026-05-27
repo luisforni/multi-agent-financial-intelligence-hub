@@ -52,9 +52,9 @@ _LLM_FAILURE_THRESHOLD = 3   # pause after this many back-to-back failures
 _llm_paused_until: float = 0.0
 _LLM_PAUSE_SECONDS = 300     # 5-minute pause before retrying
 
-# Concurrency cap for scanner-triggered auto-analyses (manual analyses are unlimited)
-_MAX_AUTO_ANALYSES = 2
-_auto_analysis_count = 0
+# FIFO queue for scanner-triggered auto-analyses (1 at a time, no Ollama overload)
+_scan_queue: asyncio.Queue[str] = asyncio.Queue()
+_scan_queued: set[str] = set()  # dedup: avoid queuing the same ticker twice
 
 ANALYSES_KEY = "fintelligence:analyses"
 
@@ -73,6 +73,67 @@ _unsettled: list[tuple[Any, float]] = [] # (settle_date, amount) for T+2 settlem
 WATCHLIST_KEY = "fintelligence:watchlist"
 PORTFOLIO_KEY = "fintelligence:portfolio"
 CLOSED_TRADES_KEY = "fintelligence:closed_trades"
+
+
+# ── Alpaca sync ───────────────────────────────────────────────────────────────
+
+async def _sync_with_alpaca() -> None:
+    """Reconcile in-memory positions against Alpaca on startup."""
+    if not _alpaca:
+        return
+    try:
+        alpaca_positions = await _alpaca.get_positions()
+        alpaca_tickers = {p["symbol"] for p in alpaca_positions}
+
+        # Remove app positions absent from Alpaca (phantom / rejected orders)
+        for ticker in list(_positions.keys()):
+            if ticker not in alpaca_tickers:
+                logger.warning("Removing phantom position %s (not found in Alpaca)", ticker)
+                _positions.pop(ticker, None)
+                await _delete_position(ticker)
+
+        # Import Alpaca positions the app doesn't know about
+        for p in alpaca_positions:
+            ticker = p["symbol"]
+            if ticker not in _positions:
+                direction = TradeDirection.LONG if p["side"] == "long" else TradeDirection.SHORT
+                pos = Position(
+                    ticker=ticker,
+                    company_name=ticker,
+                    direction=direction,
+                    entry_price=float(p["avg_entry_price"]),
+                    quantity=float(p["qty"]),
+                    current_price=float(p["current_price"]),
+                    signal=Signal.BUY if direction == TradeDirection.LONG else Signal.SELL,
+                )
+                _positions[ticker] = pos
+                await _save_position(pos)
+                logger.info("Imported Alpaca position %s @ $%.2f", ticker, pos.entry_price)
+
+        logger.info(
+            "Alpaca sync complete — app has %d positions, Alpaca has %d",
+            len(_positions), len(alpaca_tickers),
+        )
+    except Exception as exc:
+        logger.warning("Alpaca sync failed (non-fatal): %s", exc)
+
+
+# ── Scanner FIFO queue worker ─────────────────────────────────────────────────
+
+async def _scan_queue_worker() -> None:
+    """Process scanner-triggered analyses one at a time to avoid Ollama overload."""
+    try:
+        while True:
+            ticker = await _scan_queue.get()
+            _scan_queued.discard(ticker)
+            try:
+                await _auto_analyze(ticker)
+            except Exception:
+                pass
+            finally:
+                _scan_queue.task_done()
+    except asyncio.CancelledError:
+        pass
 
 
 # ── Lifespan ──────────────────────────────────────────────────────────────────
@@ -106,6 +167,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if settings.alpaca_enabled:
         _alpaca = AlpacaClient(settings)
         logger.info("Alpaca trading enabled (mode=%s)", settings.alpaca_mode)
+        await _sync_with_alpaca()
     else:
         logger.info("Alpaca trading disabled (ALPACA_MODE not set or keys missing)")
 
@@ -113,11 +175,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     scanner_task = asyncio.create_task(_scanner_listener(settings.redis_url))
     price_task = asyncio.create_task(_price_monitor())
+    queue_task = asyncio.create_task(_scan_queue_worker())
 
     yield
 
     scanner_task.cancel()
     price_task.cancel()
+    queue_task.cancel()
     if _coordinator:
         await _coordinator.close()
     if _message_bus:
@@ -591,21 +655,23 @@ async def _scanner_listener(redis_url: str) -> None:
                                         "Scanner auto-analysis paused (LLM circuit breaker, %.0fs remaining)",
                                         _llm_paused_until - now,
                                     )
-                                elif _auto_analysis_count >= _MAX_AUTO_ANALYSES:
-                                    logger.debug(
-                                        "Scanner auto-analysis at concurrency cap (%d/%d)",
-                                        _auto_analysis_count, _MAX_AUTO_ANALYSES,
-                                    )
                                 else:
                                     last = _last_analysis_time.get(alert.ticker, 0)
-                                    if now - last >= ANALYSIS_COOLDOWN_SECONDS and alert.ticker not in _active_tasks:
+                                    already_queued = alert.ticker in _scan_queued
+                                    already_active = alert.ticker in _active_tasks
+                                    cooldown_ok = now - last >= ANALYSIS_COOLDOWN_SECONDS
+                                    if cooldown_ok and not already_queued and not already_active:
                                         _last_analysis_time[alert.ticker] = now
-                                        task = asyncio.create_task(_auto_analyze(alert.ticker))
-                                        _active_tasks[alert.ticker] = task
-                                    else:
+                                        _scan_queued.add(alert.ticker)
+                                        await _scan_queue.put(alert.ticker)
+                                        logger.debug(
+                                            "Queued auto-analysis for %s (queue depth: %d)",
+                                            alert.ticker, _scan_queue.qsize(),
+                                        )
+                                    elif not cooldown_ok:
                                         remaining = int(ANALYSIS_COOLDOWN_SECONDS - (now - last))
                                         logger.debug(
-                                            "Skipping auto-analysis for %s (cooldown %ds remaining)",
+                                            "Skipping %s — cooldown %ds remaining",
                                             alert.ticker, remaining,
                                         )
                         except Exception as exc:
@@ -638,10 +704,9 @@ async def _make_progress_cb(ticker: str):
 
 
 async def _auto_analyze(ticker: str) -> None:
-    global _consecutive_llm_failures, _llm_paused_until, _auto_analysis_count
+    global _consecutive_llm_failures, _llm_paused_until
     if not _coordinator:
         return
-    _auto_analysis_count += 1
     progress_cb = await _make_progress_cb(ticker)
     try:
         await ws_manager.broadcast({"type": "analysis_started", "ticker": ticker})
@@ -665,7 +730,6 @@ async def _auto_analyze(ticker: str) -> None:
             )
         await ws_manager.broadcast({"type": "error", "ticker": ticker, "message": str(exc)})
     finally:
-        _auto_analysis_count -= 1
         _active_tasks.pop(ticker, None)
 
 
