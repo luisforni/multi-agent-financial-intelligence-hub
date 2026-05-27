@@ -66,6 +66,10 @@ _closed_trades: deque[ClosedTrade] = deque(maxlen=200)
 _peak_equity: float = 0.0               # highest equity reached (for drawdown calc)
 _trading_paused: bool = False           # paused due to drawdown
 
+# Trading safeguards state
+_day_trade_log: list[Any] = []           # datetime.date entries for each day trade
+_unsettled: list[tuple[Any, float]] = [] # (settle_date, amount) for T+2 settlement
+
 WATCHLIST_KEY = "fintelligence:watchlist"
 PORTFOLIO_KEY = "fintelligence:portfolio"
 CLOSED_TRADES_KEY = "fintelligence:closed_trades"
@@ -225,6 +229,42 @@ def _is_market_open() -> bool:
     return market_open <= now <= market_close
 
 
+# ── Trading safeguards helpers ────────────────────────────────────────────────
+
+def _slippage_price(price: float, direction: TradeDirection, is_opening: bool, settings: Any) -> float:
+    """Simulate bid/ask spread: buys pay more, sells receive less."""
+    pct = settings.slippage_pct
+    buying = (direction == TradeDirection.LONG and is_opening) or \
+             (direction == TradeDirection.SHORT and not is_opening)
+    return round(price * (1 + pct if buying else 1 - pct), 4)
+
+
+def _day_trades_in_window() -> int:
+    """Count day trades recorded in the last ~5 business days (7 calendar days)."""
+    from datetime import date as _date, timedelta
+    cutoff = _date.today() - timedelta(days=7)
+    return sum(1 for d in _day_trade_log if d >= cutoff)
+
+
+def _unsettled_amount() -> float:
+    """Return total cash pending T+2 settlement; prune expired entries in-place."""
+    from datetime import date as _date
+    today = _date.today()
+    active = [(s, a) for s, a in _unsettled if s > today]
+    _unsettled[:] = active
+    return sum(a for _, a in active)
+
+
+def _can_close_today(pos: Position, settings: Any) -> bool:
+    """False if closing this position today would create a PDT day-trade."""
+    if settings.min_hold_days <= 0:
+        return True
+    from datetime import timezone
+    ent = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=timezone.utc)
+    held = (datetime.now(timezone.utc).date() - ent.date()).days
+    return held >= settings.min_hold_days
+
+
 # ── Paper trading logic ───────────────────────────────────────────────────────
 
 async def _open_position(rec: InvestmentRecommendation) -> None:
@@ -251,9 +291,26 @@ async def _open_position(rec: InvestmentRecommendation) -> None:
         logger.info("Max positions reached (%d) — skipping %s", len(_positions), ticker)
         return
 
-    position_size = _compute_position_size(settings)
+    # PDT guard: block if at the 3-day-trade limit in the rolling 5-business-day window
+    dt_count = _day_trades_in_window()
+    if dt_count >= settings.max_day_trades:
+        logger.warning("PDT limit reached (%d day trades in 5d) — skipping %s", dt_count, ticker)
+        return
+
+    # Settled cash guard: don't open positions with unsettled T+2 funds
+    unsettled = _unsettled_amount()
+    available_cash = _current_equity(settings) - unsettled
+    if available_cash < settings.min_position_usd:
+        logger.info("Insufficient settled cash $%.2f (unsettled $%.2f) — skipping %s",
+                    available_cash, unsettled, ticker)
+        return
+
     direction = TradeDirection.LONG if rec.signal in (Signal.BUY, Signal.STRONG_BUY) else TradeDirection.SHORT
-    quantity = round(position_size / price, 4)
+
+    # Apply slippage to simulate bid/ask spread on entry fill
+    entry_price = _slippage_price(price, direction, True, settings)
+    position_size = min(_compute_position_size(settings), available_cash)
+    quantity = round(position_size / entry_price, 4)
 
     # Validate stop_loss — LLMs sometimes return wrong-direction values
     stop_loss = rec.stop_loss
@@ -279,7 +336,7 @@ async def _open_position(rec: InvestmentRecommendation) -> None:
         ticker=ticker,
         company_name=rec.company_name,
         direction=direction,
-        entry_price=price,
+        entry_price=entry_price,
         quantity=quantity,
         stop_loss=stop_loss,
         target_price=target,
@@ -288,7 +345,7 @@ async def _open_position(rec: InvestmentRecommendation) -> None:
     )
     _positions[ticker] = pos
     await _save_position(pos)
-    logger.info("Opened %s position for %s @ $%.2f", direction, ticker, price)
+    logger.info("Opened %s position for %s @ $%.4f (slippage from $%.2f)", direction, ticker, entry_price, price)
 
     if _alpaca:
         try:
@@ -301,7 +358,7 @@ async def _open_position(rec: InvestmentRecommendation) -> None:
         "type": "position_opened",
         "ticker": ticker,
         "direction": direction,
-        "entry_price": price,
+        "entry_price": entry_price,
         "quantity": quantity,
         "stop_loss": stop_loss,
         "target_price": target,
@@ -314,16 +371,21 @@ async def _close_position(ticker: str, exit_price: float, reason: str) -> Closed
     if not pos:
         return None
 
+    settings = get_settings()
+
+    # Apply slippage to exit fill price
+    fill_price = _slippage_price(exit_price, pos.direction, False, settings)
+
     mult = 1.0 if pos.direction == TradeDirection.LONG else -1.0
-    realized_pnl = (exit_price - pos.entry_price) * pos.quantity * mult
-    realized_pnl_pct = ((exit_price - pos.entry_price) / pos.entry_price) * 100.0 * mult
+    realized_pnl = (fill_price - pos.entry_price) * pos.quantity * mult
+    realized_pnl_pct = ((fill_price - pos.entry_price) / pos.entry_price) * 100.0 * mult
 
     trade = ClosedTrade(
         ticker=ticker,
         company_name=pos.company_name,
         direction=pos.direction,
         entry_price=pos.entry_price,
-        exit_price=exit_price,
+        exit_price=fill_price,
         entry_time=pos.entry_time,
         quantity=pos.quantity,
         realized_pnl=round(realized_pnl, 2),
@@ -340,13 +402,26 @@ async def _close_position(ticker: str, exit_price: float, reason: str) -> Closed
         except Exception as exc:
             logger.error("Alpaca close failed for %s: %s", ticker, exc)
 
-    logger.info("Closed %s for %s @ $%.2f | PnL: $%.2f (%.1f%%) [%s]",
-                pos.direction, ticker, exit_price, realized_pnl, realized_pnl_pct, reason)
+    # Day trade detection: opened and closed on the same calendar day
+    from datetime import timezone, timedelta
+    ent = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=timezone.utc)
+    today = datetime.now(timezone.utc).date()
+    if ent.date() == today:
+        _day_trade_log.append(today)
+        logger.info("Day trade logged for %s — %d in rolling 5-day window", ticker, _day_trades_in_window())
+
+    # T+2 settlement: mark proceeds as unsettled
+    proceed = abs(fill_price * pos.quantity)
+    settle_date = today + timedelta(days=settings.settlement_days)
+    _unsettled.append((settle_date, proceed))
+
+    logger.info("Closed %s for %s @ $%.4f (fill) | PnL: $%.2f (%.1f%%) [%s]",
+                pos.direction, ticker, fill_price, realized_pnl, realized_pnl_pct, reason)
 
     await ws_manager.broadcast({
         "type": "position_closed",
         "ticker": ticker,
-        "exit_price": exit_price,
+        "exit_price": fill_price,
         "realized_pnl": trade.realized_pnl,
         "realized_pnl_pct": trade.realized_pnl_pct,
         "exit_reason": reason,
@@ -387,6 +462,14 @@ async def _handle_trade_signal(rec: InvestmentRecommendation) -> None:
                 logger.debug(
                     "Skipping signal reversal for %s — held only %.0fs (min %ds)",
                     ticker, held_seconds, MIN_HOLD_SECONDS,
+                )
+                return
+            # PDT guard: don't reverse a position opened today (would be a day trade)
+            settings = get_settings()
+            if not _can_close_today(existing, settings):
+                logger.info(
+                    "PDT guard: skipping reversal for %s — position opened today (min_hold_days=%d)",
+                    ticker, settings.min_hold_days,
                 )
                 return
             await _close_position(ticker, price, "signal_reversal")
@@ -449,12 +532,18 @@ async def _price_monitor() -> None:
                             await _close_position(ticker, price, "stop_loss")
                             continue
 
-                    # Take-profit check
+                    # Take-profit check — PDT guard: skip if position opened today
                     if pos.target_price:
-                        if pos.direction == TradeDirection.LONG and price >= pos.target_price:
-                            await _close_position(ticker, price, "take_profit")
-                        elif pos.direction == TradeDirection.SHORT and price <= pos.target_price:
-                            await _close_position(ticker, price, "take_profit")
+                        triggered = (
+                            (pos.direction == TradeDirection.LONG and price >= pos.target_price) or
+                            (pos.direction == TradeDirection.SHORT and price <= pos.target_price)
+                        )
+                        if triggered:
+                            tp_settings = get_settings()
+                            if _can_close_today(pos, tp_settings):
+                                await _close_position(ticker, price, "take_profit")
+                            else:
+                                logger.debug("PDT guard: holding %s take-profit — opened today", ticker)
 
             except asyncio.CancelledError:
                 raise
@@ -859,15 +948,23 @@ async def get_portfolio() -> dict[str, Any]:
             "trading_paused": _trading_paused,
             "market_open": _is_market_open(),
             "max_positions_allowed": max_positions,
+            "day_trades_in_window": _day_trades_in_window(),
+            "unsettled_cash": round(_unsettled_amount(), 2),
+            "slippage_pct": settings.slippage_pct,
         },
     }
 
 
 @app.delete("/portfolio", tags=["Portfolio"])
 async def reset_portfolio() -> dict[str, Any]:
+    global _peak_equity, _trading_paused
     closed = list(_positions.keys())
     _positions.clear()
     _closed_trades.clear()
+    _day_trade_log.clear()
+    _unsettled.clear()
+    _peak_equity = 0.0
+    _trading_paused = False
     if _redis:
         await _redis.delete(PORTFOLIO_KEY)
         await _redis.delete(CLOSED_TRADES_KEY)

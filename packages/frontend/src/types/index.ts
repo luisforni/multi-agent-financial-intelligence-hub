@@ -107,6 +107,9 @@ export interface PortfolioSummary {
   trading_paused?: boolean
   market_open?: boolean
   max_positions_allowed?: number
+  day_trades_in_window?: number
+  unsettled_cash?: number
+  slippage_pct?: number
 }
 
 export type WsEvent =

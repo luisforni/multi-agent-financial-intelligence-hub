@@ -93,6 +93,12 @@ class Settings(BaseSettings):
     max_drawdown_pct: float = Field(0.20, alias="MAX_DRAWDOWN_PCT")
     trading_hours_only: bool = Field(False, alias="TRADING_HOURS_ONLY")
 
+    # Trading safeguards
+    max_day_trades: int = Field(3, alias="MAX_DAY_TRADES")          # PDT: max day trades per 5 business days
+    min_hold_days: int = Field(1, alias="MIN_HOLD_DAYS")             # Minimum days before allowing signal reversal
+    slippage_pct: float = Field(0.001, alias="SLIPPAGE_PCT")         # Bid/ask spread simulation (0.1%)
+    settlement_days: int = Field(2, alias="SETTLEMENT_DAYS")         # T+2 cash settlement
+
     @property
     def is_production(self) -> bool:
         return self.environment == "production"
