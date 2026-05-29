@@ -127,3 +127,5 @@ export type WsEvent =
   | { type: 'position_update'; ticker: string; current_price: number; unrealized_pnl: number | null; unrealized_pnl_pct: number | null }
   | { type: 'analysis_cancelled'; ticker: string }
   | { type: 'portfolio_reset' }
+  | { type: 'alpaca_order_failed'; ticker: string; message: string }
+  | { type: 'alpaca_order_filled'; ticker: string; direction: Direction; qty: number; price: number }

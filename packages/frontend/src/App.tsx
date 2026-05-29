@@ -49,6 +49,7 @@ export default function App() {
   const [positions, setPositions] = useState<OpenPosition[]>([])
   const [closedTrades, setClosedTrades] = useState<ClosedTrade[]>([])
   const [summary, setSummary] = useState<PortfolioSummary>(EMPTY_SUMMARY)
+  const [confirmReset, setConfirmReset] = useState(false)
 
   const positionsRef = useRef(positions)
   positionsRef.current = positions
@@ -115,6 +116,11 @@ export default function App() {
       setPositions([])
       setClosedTrades([])
       setSummary(EMPTY_SUMMARY)
+    } else if (evt.type === 'alpaca_order_failed') {
+      pushFeed(makeFeedItem('error', evt.ticker, `Alpaca: ${evt.message}`))
+    } else if (evt.type === 'alpaca_order_filled') {
+      pushFeed(makeFeedItem('analysis_complete', evt.ticker,
+        `Alpaca filled ${evt.direction} ${evt.qty.toFixed(4)} @ $${evt.price.toFixed(2)}`))
     }
   }, [pushFeed, refreshPortfolio, t])
 
@@ -209,12 +215,30 @@ export default function App() {
             <XCircle size={11} /> {t('btn.stopAll', { count: analyzing.size })}
           </button>
         )}
-        <button
-          onClick={handleClearAll}
-          className="flex items-center gap-1 text-[11px] text-muted border border-border hover:text-[#d1d4dc] hover:bg-panel2 px-2 py-0.5 rounded transition-colors"
-        >
-          <RotateCcw size={11} /> {t('btn.reset')}
-        </button>
+        {confirmReset ? (
+          <span className="flex items-center gap-1.5">
+            <span className="text-[11px] text-sell">¿Reiniciar todo?</span>
+            <button
+              onClick={() => { handleClearAll(); setConfirmReset(false) }}
+              className="text-[11px] text-sell border border-sell/50 hover:bg-sell/10 px-2 py-0.5 rounded transition-colors"
+            >
+              Confirmar
+            </button>
+            <button
+              onClick={() => setConfirmReset(false)}
+              className="text-[11px] text-muted border border-border hover:text-[#d1d4dc] px-2 py-0.5 rounded transition-colors"
+            >
+              Cancelar
+            </button>
+          </span>
+        ) : (
+          <button
+            onClick={() => setConfirmReset(true)}
+            className="flex items-center gap-1 text-[11px] text-muted border border-border hover:text-[#d1d4dc] hover:bg-panel2 px-2 py-0.5 rounded transition-colors"
+          >
+            <RotateCcw size={11} /> {t('btn.reset')}
+          </button>
+        )}
 
         <div className="w-px h-4 bg-border shrink-0" />
         <LanguageSwitcher />

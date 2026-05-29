@@ -237,6 +237,45 @@ async def _sync_with_alpaca() -> None:
 
 # ── Scanner FIFO queue worker ─────────────────────────────────────────────────
 
+async def _periodic_reconcile() -> None:
+    """Sync internal positions against Alpaca every 5 minutes."""
+    await asyncio.sleep(60)  # initial delay — let startup settle first
+    while True:
+        try:
+            await _sync_with_alpaca()
+        except Exception as exc:
+            logger.warning("Periodic reconciliation failed: %s", exc)
+        await asyncio.sleep(300)
+
+
+async def _verify_fill(ticker: str, order_id: str, direction: str) -> None:
+    """Background task: confirm an Alpaca order was filled and notify the frontend."""
+    if not _alpaca:
+        return
+    try:
+        order = await _alpaca.wait_for_fill(order_id)
+        filled_qty = float(order.get("filled_qty") or 0)
+        fill_price = float(order.get("filled_avg_price") or 0)
+        logger.info(
+            "Alpaca fill confirmed: %s %s %.4f @ $%.4f",
+            direction, ticker, filled_qty, fill_price,
+        )
+        await ws_manager.broadcast({
+            "type": "alpaca_order_filled",
+            "ticker": ticker,
+            "direction": direction,
+            "qty": filled_qty,
+            "price": fill_price,
+        })
+    except Exception as exc:
+        logger.warning("Alpaca fill not confirmed for %s: %s", ticker, exc)
+        await ws_manager.broadcast({
+            "type": "alpaca_order_failed",
+            "ticker": ticker,
+            "message": f"Fill not confirmed: {exc}",
+        })
+
+
 async def _scan_queue_worker() -> None:
     """Process scanner-triggered analyses one at a time to avoid Ollama overload."""
     try:
@@ -295,6 +334,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     price_task = asyncio.create_task(_price_monitor())
     queue_task = asyncio.create_task(_scan_queue_worker())
     overnight_task = asyncio.create_task(_overnight_analyzer())
+    reconcile_task = asyncio.create_task(_periodic_reconcile())
 
     yield
 
@@ -302,6 +342,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     price_task.cancel()
     queue_task.cancel()
     overnight_task.cancel()
+    reconcile_task.cancel()
     if _coordinator:
         await _coordinator.close()
     if _message_bus:
@@ -532,6 +573,23 @@ async def _open_position(rec: InvestmentRecommendation) -> None:
         elif direction == TradeDirection.SHORT and target >= price:
             target = round(price * 0.90, 2)
 
+    # Submit to Alpaca FIRST — only create internal position if order is accepted
+    if _alpaca:
+        try:
+            side = "buy" if direction == TradeDirection.LONG else "sell"
+            order = await _alpaca.submit_order(ticker, quantity, side)
+            order_id = order.get("id")
+            if order_id:
+                asyncio.create_task(_verify_fill(ticker, order_id, str(direction)))
+        except Exception as exc:
+            logger.error("Alpaca order rejected for %s: %s", ticker, exc)
+            await ws_manager.broadcast({
+                "type": "alpaca_order_failed",
+                "ticker": ticker,
+                "message": str(exc),
+            })
+            return  # don't create phantom position
+
     pos = Position(
         ticker=ticker,
         company_name=rec.company_name,
@@ -554,13 +612,6 @@ async def _open_position(rec: InvestmentRecommendation) -> None:
         equity_now, compound_growth, position_size,
         rec.confidence * 100, dt_count, settings.max_day_trades,
     )
-
-    if _alpaca:
-        try:
-            side = "buy" if direction == TradeDirection.LONG else "sell"
-            await _alpaca.submit_order(ticker, quantity, side)
-        except Exception as exc:
-            logger.error("Alpaca order failed for %s: %s", ticker, exc)
 
     await ws_manager.broadcast({
         "type": "position_opened",
@@ -609,6 +660,11 @@ async def _close_position(ticker: str, exit_price: float, reason: str) -> Closed
             await _alpaca.close_position(ticker)
         except Exception as exc:
             logger.error("Alpaca close failed for %s: %s", ticker, exc)
+            await ws_manager.broadcast({
+                "type": "alpaca_order_failed",
+                "ticker": ticker,
+                "message": f"Close failed: {exc}",
+            })
 
     # Day trade detection: opened and closed on the same calendar day
     from datetime import timezone, timedelta
