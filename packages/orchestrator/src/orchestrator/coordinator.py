@@ -197,6 +197,10 @@ class AgentCoordinator:
             )
             raise
 
+    async def refresh_sentiment(self, ticker: str) -> Any:
+        """Run only the sentiment agent for a ticker (used by the background sentiment worker)."""
+        return await self._run_sentiment(ticker)
+
     async def _run_sentiment(self, ticker: str) -> Any:
         try:
             import yfinance as yf

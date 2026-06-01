@@ -59,7 +59,11 @@ _LLM_FAILURE_THRESHOLD = 3   # pause after this many back-to-back failures
 _llm_paused_until: float = 0.0
 _LLM_PAUSE_SECONDS = 300     # 5-minute pause before retrying
 
-# FIFO queue for scanner-triggered auto-analyses (1 at a time, no Ollama overload)
+# Queue 1 — slow: background sentiment refresh (1 at a time, 24/7)
+_sentiment_queue: asyncio.Queue[str] = asyncio.Queue()
+_sentiment_queued: set[str] = set()  # dedup
+
+# Queue 2 — fast: scanner-triggered analyses (1 at a time, NEVER runs sentiment)
 _scan_queue: asyncio.Queue[str] = asyncio.Queue()
 _scan_queued: set[str] = set()  # dedup: avoid queuing the same ticker twice
 
@@ -128,6 +132,77 @@ async def _load_sentiment_cache_from_redis() -> None:
         except Exception:
             pass
     logger.info("Sentiment cache loaded from Redis: %d valid entries", loaded)
+
+
+def _neutral_sentiment(ticker: str) -> SentimentData:
+    """Neutral placeholder used when no cached sentiment exists for a ticker."""
+    from shared.models import SentimentLabel
+    return SentimentData(
+        ticker=ticker,
+        company_name=ticker,
+        label=SentimentLabel.NEUTRAL,
+        overall_score=0.0,
+        sentiment_summary="Sentiment not yet available — analysis based on market data and chart only.",
+    )
+
+
+async def _enqueue_sentiment_warmup() -> None:
+    """Queue all watchlist tickers that lack a fresh sentiment entry (highest scanner score first)."""
+    if not _redis:
+        return
+    try:
+        tickers = list(await _redis.smembers(WATCHLIST_KEY))
+        tickers.sort(key=lambda t: _scanner_scores.get(t, 0.0), reverse=True)
+        queued = 0
+        for ticker in tickers:
+            if ticker not in _sentiment_queued and _get_cached_sentiment(ticker) is None:
+                _sentiment_queued.add(ticker)
+                await _sentiment_queue.put(ticker)
+                queued += 1
+        if queued:
+            logger.info("Sentiment warmup: queued %d tickers with missing/stale cache", queued)
+    except Exception as exc:
+        logger.warning("Sentiment warmup failed: %s", exc)
+
+
+async def _sentiment_worker() -> None:
+    """
+    Queue 1 — slow, 24/7 background task.
+    Refreshes the sentiment cache for every watchlist ticker one at a time.
+    Idles between runs to avoid overloading Ollama.
+    """
+    await asyncio.sleep(15)  # let startup settle before first run
+    await _enqueue_sentiment_warmup()
+    try:
+        while True:
+            try:
+                # Wait up to 30 min for the next ticker; if queue is empty, re-enqueue stale ones
+                ticker = await asyncio.wait_for(_sentiment_queue.get(), timeout=1800)
+            except asyncio.TimeoutError:
+                await _enqueue_sentiment_warmup()
+                continue
+
+            _sentiment_queued.discard(ticker)
+            if not _coordinator:
+                _sentiment_queue.task_done()
+                continue
+
+            try:
+                logger.info("Sentiment worker: refreshing %s", ticker)
+                result = await _coordinator.refresh_sentiment(ticker)
+                await _save_sentiment_cache(ticker, result)
+                logger.info(
+                    "Sentiment worker: cached %s → %s (score %+.2f)",
+                    ticker, result.label, result.overall_score or 0.0,
+                )
+            except Exception as exc:
+                logger.warning("Sentiment worker: %s failed — %s", ticker, exc)
+            finally:
+                _sentiment_queue.task_done()
+
+            await asyncio.sleep(5)  # brief pause between tickers
+    except asyncio.CancelledError:
+        pass
 
 
 # ── Overnight batch analyzer ──────────────────────────────────────────────────
@@ -335,6 +410,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     queue_task = asyncio.create_task(_scan_queue_worker())
     overnight_task = asyncio.create_task(_overnight_analyzer())
     reconcile_task = asyncio.create_task(_periodic_reconcile())
+    sentiment_task = asyncio.create_task(_sentiment_worker())
 
     yield
 
@@ -343,6 +419,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     queue_task.cancel()
     overnight_task.cancel()
     reconcile_task.cancel()
+    sentiment_task.cancel()
     if _coordinator:
         await _coordinator.close()
     if _message_bus:
@@ -912,17 +989,17 @@ async def _auto_analyze(ticker: str) -> None:
     try:
         await ws_manager.broadcast({"type": "analysis_started", "ticker": ticker})
 
-        market_open = _is_market_open()
-        cached = _get_cached_sentiment(ticker) if market_open else None
-        if market_open and cached is not None:
+        # Queue 2 (fast): always use cached sentiment or neutral fallback.
+        # Sentiment is handled exclusively by Queue 1 (_sentiment_worker).
+        cached = _get_cached_sentiment(ticker)
+        if cached is not None:
             age_h = round((time.time() - _sentiment_cache[ticker][1]) / 3600, 1)
             logger.info("Fast path for %s — cached sentiment %sh old", ticker, age_h)
+        else:
+            cached = _neutral_sentiment(ticker)
+            logger.info("Fast path for %s — no sentiment cache, using neutral fallback", ticker)
 
         rec = await _coordinator.analyze(ticker, on_progress=progress_cb, cached_sentiment=cached)
-
-        # Cache sentiment after overnight full-pipeline runs
-        if not market_open and rec.sentiment_data:
-            await _save_sentiment_cache(ticker, rec.sentiment_data)
 
         _consecutive_llm_failures = 0  # reset circuit breaker on success
         summary = _rec_to_dict(rec)
