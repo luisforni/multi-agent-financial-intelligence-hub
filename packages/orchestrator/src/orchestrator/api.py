@@ -173,7 +173,8 @@ async def _sentiment_worker() -> None:
     """
     Queue 1 — slow, 24/7 background task.
     Refreshes the sentiment cache for every watchlist ticker one at a time.
-    Idles between runs to avoid overloading Ollama.
+    Yields to Queue 2 (scanner): waits until no active LLM analyses are running
+    before starting a sentiment call, so both queues never share Ollama simultaneously.
     """
     await asyncio.sleep(15)  # let startup settle before first run
     await _enqueue_sentiment_warmup()
@@ -190,6 +191,15 @@ async def _sentiment_worker() -> None:
             if not _coordinator:
                 _sentiment_queue.task_done()
                 continue
+
+            # Yield to scanner: don't run sentiment while scanner analyses are in flight
+            # (both share Ollama — concurrent calls cause 240s timeouts)
+            yielded = 0
+            while (_active_tasks or not _scan_queue.empty()) and yielded < 24:
+                if yielded == 0:
+                    logger.debug("Sentiment worker yielding to scanner for %s", ticker)
+                await asyncio.sleep(15)
+                yielded += 1
 
             try:
                 logger.info("Sentiment worker: refreshing %s", ticker)
