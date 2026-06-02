@@ -192,14 +192,15 @@ async def _sentiment_worker() -> None:
                 _sentiment_queue.task_done()
                 continue
 
-            # Yield to scanner: don't run sentiment while scanner analyses are in flight
-            # (both share Ollama — concurrent calls cause 240s timeouts)
-            yielded = 0
-            while (_active_tasks or not _scan_queue.empty()) and yielded < 24:
-                if yielded == 0:
-                    logger.debug("Sentiment worker yielding to scanner for %s", ticker)
-                await asyncio.sleep(15)
-                yielded += 1
+            # During market hours Ollama is reserved exclusively for the scanner.
+            # Wait until market closes before running any sentiment LLM call.
+            if _is_market_open():
+                logger.debug("Sentiment worker paused — market open, Ollama reserved for scanner")
+                _sentiment_queued.add(ticker)
+                await _sentiment_queue.put(ticker)
+                _sentiment_queue.task_done()
+                await asyncio.sleep(300)  # check again in 5 min
+                continue
 
             try:
                 logger.info("Sentiment worker: refreshing %s", ticker)
