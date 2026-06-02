@@ -72,8 +72,18 @@ export default function App() {
     }).catch(() => {})
   }, [])
 
+  const loadInitialData = useCallback(() => {
+    api.getWatchlist().then(r => setWatchlist(r.tickers)).catch(() => {})
+    api.getRecentAnalyses().then(r => { if (r.analyses.length > 0) setAnalyses(r.analyses) }).catch(() => {})
+    api.getActiveAnalyses().then(r => { if (r.active.length > 0) setAnalyzing(new Set(r.active)) }).catch(() => {})
+    refreshPortfolio()
+  }, [refreshPortfolio])
+
   const handleWsEvent = useCallback((evt: WsEvent) => {
-    if (evt.type === 'scanner_alert') {
+    if (evt.type === 'connected') {
+      // Server is up — reload initial data in case the page loaded before the server was ready
+      loadInitialData()
+    } else if (evt.type === 'scanner_alert') {
       pushFeed(makeFeedItem('scanner_alert', evt.ticker,
         t('feed.scanner', { direction: evt.direction, score: evt.score.toFixed(2), signals: evt.signals.join(', ') })))
     } else if (evt.type === 'analysis_started') {
@@ -127,11 +137,8 @@ export default function App() {
   const wsConnected = useWebSocket(handleWsEvent)
 
   useEffect(() => {
-    api.getWatchlist().then(r => setWatchlist(r.tickers)).catch(() => {})
-    api.getRecentAnalyses().then(r => { if (r.analyses.length > 0) setAnalyses(r.analyses) }).catch(() => {})
-    api.getActiveAnalyses().then(r => { if (r.active.length > 0) setAnalyzing(new Set(r.active)) }).catch(() => {})
-    refreshPortfolio()
-  }, [refreshPortfolio])
+    loadInitialData()
+  }, [loadInitialData])
 
   async function handleAnalyze(ticker: string) {
     if (analyzing.has(ticker)) return
