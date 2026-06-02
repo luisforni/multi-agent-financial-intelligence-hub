@@ -38,6 +38,10 @@ _message_bus: MessageBus | None = None
 _redis: aioredis.Redis | None = None
 _alpaca: AlpacaClient | None = None
 
+# Cached Alpaca account state — refreshed on every sync
+_alpaca_buying_power: float = 0.0
+_alpaca_shorting_enabled: bool = True
+
 _recent_analyses: deque[dict[str, Any]] = deque(maxlen=50)
 
 # Analysis dedup: ticker → epoch seconds of last triggered analysis
@@ -270,10 +274,20 @@ async def _overnight_analyzer() -> None:
 # ── Alpaca sync ───────────────────────────────────────────────────────────────
 
 async def _sync_with_alpaca() -> None:
-    """Reconcile in-memory positions against Alpaca on startup."""
+    """Reconcile in-memory positions against Alpaca and refresh cached account state."""
+    global _alpaca_buying_power, _alpaca_shorting_enabled
     if not _alpaca:
         return
     try:
+        # Refresh account state so position sizing and SHORT guard use fresh data
+        account = await _alpaca.get_account()
+        _alpaca_buying_power = float(
+            account.get("non_marginable_buying_power") or account.get("buying_power") or 0
+        )
+        _alpaca_shorting_enabled = account.get("shorting_enabled", True)
+        if not _alpaca_shorting_enabled:
+            logger.info("Alpaca shorting disabled — SHORT signals will be skipped")
+
         alpaca_positions = await _alpaca.get_positions()
         alpaca_tickers = {p["symbol"] for p in alpaca_positions}
 
@@ -625,9 +639,26 @@ async def _open_position(rec: InvestmentRecommendation) -> None:
 
     direction = TradeDirection.LONG if rec.signal in (Signal.BUY, Signal.STRONG_BUY) else TradeDirection.SHORT
 
+    # Skip SHORT if Alpaca account has shorting disabled
+    if direction == TradeDirection.SHORT and _alpaca and not _alpaca_shorting_enabled:
+        logger.info("Skipping SHORT for %s — shorting disabled in Alpaca account", ticker)
+        return
+
     # Apply slippage to simulate bid/ask spread on entry fill
     entry_price = _slippage_price(price, direction, True, settings)
     position_size = min(_compute_position_size(settings), available_cash)
+
+    # Cap position size to actual Alpaca buying power (with 3% buffer) to prevent
+    # "insufficient buying power" rejections when app equity diverges from Alpaca balance
+    if _alpaca and _alpaca_buying_power > 0:
+        alpaca_cap = _alpaca_buying_power * 0.97
+        if position_size > alpaca_cap:
+            logger.info(
+                "Capping position for %s: $%.2f → $%.2f (Alpaca buying power $%.2f)",
+                ticker, position_size, alpaca_cap, _alpaca_buying_power,
+            )
+            position_size = alpaca_cap
+
     quantity = round(position_size / entry_price, 4)
 
     # Validate stop_loss — LLMs sometimes return wrong-direction values
