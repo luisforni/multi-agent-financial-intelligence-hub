@@ -517,7 +517,10 @@ def _current_equity(settings: Any) -> float:
 
 def _compute_position_size(settings: Any) -> float:
     equity = _current_equity(settings)
-    return max(settings.min_position_usd, equity / max(1, len(_positions) + 1))
+    # Fixed 1/max_positions_cap allocation so every position gets an equal slice.
+    # Using positions+1 as denominator caused first positions to take 50-100% of equity,
+    # exhausting Alpaca buying power and leaving cents for later positions.
+    return max(settings.min_position_usd, equity / settings.max_positions_cap)
 
 
 def _max_positions_allowed(settings: Any) -> int:
@@ -672,17 +675,18 @@ async def _open_position(rec: InvestmentRecommendation) -> None:
 
     quantity = round(position_size / entry_price, 4)
 
-    # Validate stop_loss — LLMs sometimes return wrong-direction values
+    # Stop loss: use LLM suggestion but enforce a 3% maximum distance from entry.
+    # LLMs tend to set very wide stops (10-15%) which allow huge losses before cutting.
+    MAX_STOP_PCT = 0.03
     stop_loss = rec.stop_loss
-    fallback_sl = price * (0.97 if direction == TradeDirection.LONG else 1.03)
-    if stop_loss is None:
-        stop_loss = round(fallback_sl, 2)
-    elif direction == TradeDirection.LONG and stop_loss >= price:
-        logger.warning("Invalid LONG stop_loss %.2f >= entry %.2f — using fallback", stop_loss, price)
-        stop_loss = round(price * 0.97, 2)
-    elif direction == TradeDirection.SHORT and stop_loss <= price:
-        logger.warning("Invalid SHORT stop_loss %.2f <= entry %.2f — using fallback", stop_loss, price)
-        stop_loss = round(price * 1.03, 2)
+    if direction == TradeDirection.LONG:
+        min_sl = round(price * (1 - MAX_STOP_PCT), 2)
+        if stop_loss is None or stop_loss >= price or stop_loss < min_sl:
+            stop_loss = min_sl
+    else:
+        max_sl = round(price * (1 + MAX_STOP_PCT), 2)
+        if stop_loss is None or stop_loss <= price or stop_loss > max_sl:
+            stop_loss = max_sl
 
     # Validate target_price
     target = rec.target_price_base
