@@ -114,7 +114,7 @@ class RiskAgent:
                 completion_kwargs["fallbacks"] = self._fallbacks
             response = await litellm.acompletion(
                 model=self._model,
-                max_tokens=8192,
+                max_tokens=2048,
                 messages=messages,
                 tools=RISK_TOOLS,
                 parallel_tool_calls=False,
@@ -208,8 +208,8 @@ class RiskAgent:
                 "return_on_equity": f.return_on_equity,
                 "revenue_growth_yoy": f.revenue_growth_yoy,
                 "profit_margin": f.profit_margin,
-                "technical_summary": sd.technical_summary,
-                "fundamental_summary": sd.fundamental_summary,
+                "technical_summary": (sd.technical_summary or "")[:300],
+                "fundamental_summary": (sd.fundamental_summary or "")[:300],
             }
 
         if name == "get_sentiment_summary":
@@ -221,10 +221,7 @@ class RiskAgent:
                 "reddit_score": sent.reddit_score,
                 "news_score": sent.news_score,
                 "total_mentions": sent.total_mentions,
-                "bullish_themes": sent.bullish_themes,
-                "bearish_themes": sent.bearish_themes,
-                "key_catalysts": sent.key_catalysts,
-                "sentiment_summary": sent.sentiment_summary,
+                "sentiment_summary": (sent.sentiment_summary or "")[:300],
             }
 
         if name == "compute_position_sizing":
@@ -263,7 +260,7 @@ class RiskAgent:
                 ],
                 "support_levels": ca.support_levels,
                 "resistance_levels": ca.resistance_levels,
-                "chart_summary": ca.chart_summary,
+                "chart_summary": (ca.chart_summary or "")[:300],
                 "used_vision": ca.used_vision,
             }
 
