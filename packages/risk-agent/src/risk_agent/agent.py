@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -109,17 +110,7 @@ class RiskAgent:
         recommendation_result: dict[str, Any] | None = None
 
         while True:
-            completion_kwargs = {**self._completion_kwargs}
-            if self._fallbacks:
-                completion_kwargs["fallbacks"] = self._fallbacks
-            response = await litellm.acompletion(
-                model=self._model,
-                max_tokens=2048,
-                messages=messages,
-                tools=RISK_TOOLS,
-                parallel_tool_calls=False,
-                **completion_kwargs,
-            )
+            response = await self._call_with_retry(messages)
 
             choice = response.choices[0]
 
@@ -172,6 +163,30 @@ class RiskAgent:
             },
         )
         return recommendation
+
+    async def _call_with_retry(self, messages: list[dict[str, Any]], max_retries: int = 4) -> Any:
+        """Call litellm without fallbacks; on RateLimitError sleep the indicated duration and retry."""
+        for attempt in range(max_retries):
+            try:
+                return await litellm.acompletion(
+                    model=self._model,
+                    max_tokens=2048,
+                    messages=messages,
+                    tools=RISK_TOOLS,
+                    parallel_tool_calls=False,
+                    **self._completion_kwargs,
+                )
+            except litellm.RateLimitError as exc:
+                if attempt == max_retries - 1:
+                    raise
+                match = re.search(r"try again in ([0-9.]+)s", str(exc))
+                wait = float(match.group(1)) + 3.0 if match else 30.0
+                logger.warning(
+                    "Groq rate limit — retrying in %.1fs (attempt %d/%d)",
+                    wait, attempt + 1, max_retries,
+                )
+                await asyncio.sleep(wait)
+        raise RuntimeError("unreachable")  # pragma: no cover
 
     async def _execute_tool(
         self, name: str, input_data: dict[str, Any], cache: dict[str, Any]
