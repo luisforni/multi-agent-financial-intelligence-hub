@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 import yfinance as yf
 
@@ -64,7 +64,7 @@ class StockScanner:
                 signals=signals,
                 combined_score=round(score, 3),
                 alert_direction=direction,
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
             )
             logger.info(
                 "Scanner alert generated",
