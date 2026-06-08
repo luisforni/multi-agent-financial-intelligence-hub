@@ -388,6 +388,10 @@ async def _scan_queue_worker() -> None:
                 pass
             finally:
                 _scan_queue.task_done()
+            # Overnight: throttle to 1 analysis/90s to stay within Groq 12K TPM free tier
+            # (Risk Agent uses ~10K tokens/request; 90s gap ensures we never exceed the limit)
+            if not _is_market_open():
+                await asyncio.sleep(90)
     except asyncio.CancelledError:
         pass
 
