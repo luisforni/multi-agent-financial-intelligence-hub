@@ -252,7 +252,7 @@ async def _overnight_analyzer() -> None:
                 if time.monotonic() - _last_analysis_time.get(t, 0) >= OVERNIGHT_TICKER_COOLDOWN
                 and t not in _scan_queued
                 and t not in _active_tasks
-            ]
+            ][:10]  # limit to top-10 by scanner score to conserve cloud LLM quota
 
             if not to_analyze:
                 await asyncio.sleep(1800)  # all tickers fresh — check again in 30 min
