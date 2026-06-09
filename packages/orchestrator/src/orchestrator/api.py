@@ -61,7 +61,7 @@ _PDT_CONFIDENCE_CAUTIOUS = 0.75  # 1 slot remaining: require strong conviction
 _consecutive_llm_failures = 0
 _LLM_FAILURE_THRESHOLD = 3   # pause after this many back-to-back failures
 _llm_paused_until: float = 0.0
-_LLM_PAUSE_SECONDS = 300     # 5-minute pause before retrying
+_LLM_PAUSE_SECONDS = 1800    # 30-minute pause before retrying (covers TPD window reset)
 
 # Queue 1 — slow: background sentiment refresh (1 at a time, 24/7)
 _sentiment_queue: asyncio.Queue[str] = asyncio.Queue()
@@ -252,7 +252,7 @@ async def _overnight_analyzer() -> None:
                 if time.monotonic() - _last_analysis_time.get(t, 0) >= OVERNIGHT_TICKER_COOLDOWN
                 and t not in _scan_queued
                 and t not in _active_tasks
-            ][:10]  # limit to top-10 by scanner score to conserve cloud LLM quota
+            ][:3]   # limit to top-3 by scanner score to stay within Groq 100K TPD free quota
 
             if not to_analyze:
                 await asyncio.sleep(1800)  # all tickers fresh — check again in 30 min

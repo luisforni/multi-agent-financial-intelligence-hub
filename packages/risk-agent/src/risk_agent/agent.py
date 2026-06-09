@@ -164,8 +164,18 @@ class RiskAgent:
         )
         return recommendation
 
+    @staticmethod
+    def _parse_retry_seconds(error_str: str) -> float:
+        """Parse 'try again in Xm Y.Zs' or 'try again in Y.Zs' into total seconds."""
+        m = re.search(r"try again in (?:(\d+)m\s*)?([0-9.]+)s", error_str)
+        if not m:
+            return 35.0
+        minutes = float(m.group(1) or 0)
+        seconds = float(m.group(2))
+        return minutes * 60 + seconds + 3.0
+
     async def _call_with_retry(self, messages: list[dict[str, Any]], max_retries: int = 4) -> Any:
-        """Call litellm without fallbacks; on RateLimitError sleep the indicated duration and retry."""
+        """Call litellm without fallbacks; on TPM RateLimitError sleep and retry; on TPD raise immediately."""
         for attempt in range(max_retries):
             try:
                 return await litellm.acompletion(
@@ -177,12 +187,16 @@ class RiskAgent:
                     **self._completion_kwargs,
                 )
             except litellm.RateLimitError as exc:
+                err = str(exc)
+                # Daily quota exhausted — no point retrying, raises immediately
+                if "per day" in err or "tokens per day" in err or "TPD" in err:
+                    logger.error("Groq daily token quota (TPD) exhausted — stopping analysis")
+                    raise
                 if attempt == max_retries - 1:
                     raise
-                match = re.search(r"try again in ([0-9.]+)s", str(exc))
-                wait = float(match.group(1)) + 3.0 if match else 30.0
+                wait = self._parse_retry_seconds(err)
                 logger.warning(
-                    "Groq rate limit — retrying in %.1fs (attempt %d/%d)",
+                    "Groq TPM rate limit — retrying in %.1fs (attempt %d/%d)",
                     wait, attempt + 1, max_retries,
                 )
                 await asyncio.sleep(wait)
