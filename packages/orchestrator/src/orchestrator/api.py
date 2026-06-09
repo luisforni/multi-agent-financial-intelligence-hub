@@ -930,31 +930,37 @@ async def _scanner_listener(redis_url: str) -> None:
                                 "timestamp": alert.timestamp.isoformat(),
                             })
                             if _coordinator:
-                                now = time.monotonic()
-                                if now < _llm_paused_until:
+                                if not _is_market_open():
                                     logger.debug(
-                                        "Scanner auto-analysis paused (LLM circuit breaker, %.0fs remaining)",
-                                        _llm_paused_until - now,
+                                        "Skipping analysis for %s — market closed (preserving Groq TPD quota)",
+                                        alert.ticker,
                                     )
                                 else:
-                                    last = _last_analysis_time.get(alert.ticker, 0)
-                                    already_queued = alert.ticker in _scan_queued
-                                    already_active = alert.ticker in _active_tasks
-                                    cooldown_ok = now - last >= ANALYSIS_COOLDOWN_SECONDS
-                                    if cooldown_ok and not already_queued and not already_active:
-                                        _last_analysis_time[alert.ticker] = now
-                                        _scan_queued.add(alert.ticker)
-                                        await _scan_queue.put(alert.ticker)
+                                    now = time.monotonic()
+                                    if now < _llm_paused_until:
                                         logger.debug(
-                                            "Queued auto-analysis for %s (queue depth: %d)",
-                                            alert.ticker, _scan_queue.qsize(),
+                                            "Scanner auto-analysis paused (LLM circuit breaker, %.0fs remaining)",
+                                            _llm_paused_until - now,
                                         )
-                                    elif not cooldown_ok:
-                                        remaining = int(ANALYSIS_COOLDOWN_SECONDS - (now - last))
-                                        logger.debug(
-                                            "Skipping %s — cooldown %ds remaining",
-                                            alert.ticker, remaining,
-                                        )
+                                    else:
+                                        last = _last_analysis_time.get(alert.ticker, 0)
+                                        already_queued = alert.ticker in _scan_queued
+                                        already_active = alert.ticker in _active_tasks
+                                        cooldown_ok = now - last >= ANALYSIS_COOLDOWN_SECONDS
+                                        if cooldown_ok and not already_queued and not already_active:
+                                            _last_analysis_time[alert.ticker] = now
+                                            _scan_queued.add(alert.ticker)
+                                            await _scan_queue.put(alert.ticker)
+                                            logger.debug(
+                                                "Queued auto-analysis for %s (queue depth: %d)",
+                                                alert.ticker, _scan_queue.qsize(),
+                                            )
+                                        elif not cooldown_ok:
+                                            remaining = int(ANALYSIS_COOLDOWN_SECONDS - (now - last))
+                                            logger.debug(
+                                                "Skipping %s — cooldown %ds remaining",
+                                                alert.ticker, remaining,
+                                            )
                         except Exception as exc:
                             logger.warning("Failed to process scanner alert: %s", exc)
             except asyncio.CancelledError:
