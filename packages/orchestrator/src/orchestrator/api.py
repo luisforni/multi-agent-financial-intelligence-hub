@@ -330,7 +330,12 @@ async def _verify_fill(ticker: str, order_id: str, direction: str) -> None:
 
 
 async def _scan_queue_worker() -> None:
-    """Process scanner-triggered analyses one at a time to avoid Ollama overload."""
+    """
+    Process scanner-triggered analyses one at a time.
+    Throttled to protect the Groq 100K TPD free quota:
+      - Market hours: 20-min gap (~17K tokens/analysis → max 5-6 analyses/session)
+      - Off hours: should not run (scanner guard blocks queuing outside market hours)
+    """
     try:
         while True:
             ticker = await _scan_queue.get()
@@ -341,10 +346,9 @@ async def _scan_queue_worker() -> None:
                 pass
             finally:
                 _scan_queue.task_done()
-            # Overnight: throttle to 1 analysis/90s to stay within Groq 12K TPM free tier
-            # (Risk Agent uses ~10K tokens/request; 90s gap ensures we never exceed the limit)
-            if not _is_market_open():
-                await asyncio.sleep(90)
+            # 20-min minimum between analyses: prevents burst at market open
+            # burning all 100K daily tokens in the first 30 minutes.
+            await asyncio.sleep(1200)
     except asyncio.CancelledError:
         pass
 
