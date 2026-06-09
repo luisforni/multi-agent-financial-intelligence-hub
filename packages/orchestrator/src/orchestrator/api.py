@@ -46,7 +46,7 @@ _recent_analyses: deque[dict[str, Any]] = deque(maxlen=50)
 
 # Analysis dedup: ticker → epoch seconds of last triggered analysis
 _last_analysis_time: dict[str, float] = {}
-ANALYSIS_COOLDOWN_SECONDS = 1800  # 30 minutes
+ANALYSIS_COOLDOWN_SECONDS = 3600  # 60 min — conserves Groq 100K TPD (≈10 analyses/day)
 
 # Active analysis tasks: ticker → asyncio.Task (for cancellation)
 _active_tasks: dict[str, asyncio.Task[None]] = {}
@@ -224,60 +224,13 @@ async def _sentiment_worker() -> None:
 
 async def _overnight_analyzer() -> None:
     """
-    While the market is closed, run full analysis (including sentiment) for every
-    watchlist ticker ordered by latest scanner score.  Results are stored in the
-    sentiment cache so that market-hours analyses can skip the slow LLM sentiment
-    call and use pre-computed data instead.
+    Disabled: overnight analysis burned the entire Groq 100K TPD quota before
+    market open, leaving zero tokens for actual trading hours (13:30-20:00 UTC).
+    All analysis quota is now reserved exclusively for market hours.
     """
     try:
         while True:
-            if _is_market_open():
-                await asyncio.sleep(60)
-                continue
-
-            if not _redis or not _coordinator:
-                await asyncio.sleep(600)
-                continue
-
-            tickers = list(await _redis.smembers(WATCHLIST_KEY))
-            if not tickers:
-                await asyncio.sleep(600)
-                continue
-
-            # Sort highest scanner score first (most likely to trigger at open)
-            tickers.sort(key=lambda t: _scanner_scores.get(t, 0.0), reverse=True)
-
-            to_analyze = [
-                t for t in tickers
-                if time.monotonic() - _last_analysis_time.get(t, 0) >= OVERNIGHT_TICKER_COOLDOWN
-                and t not in _scan_queued
-                and t not in _active_tasks
-            ][:3]   # limit to top-3 by scanner score to stay within Groq 100K TPD free quota
-
-            if not to_analyze:
-                await asyncio.sleep(1800)  # all tickers fresh — check again in 30 min
-                continue
-
-            logger.info(
-                "Overnight analysis: queuing %d tickers (top: %s)",
-                len(to_analyze),
-                ", ".join(f"{t}({_scanner_scores.get(t, 0):.2f})" for t in to_analyze[:5]),
-            )
-
-            for ticker in to_analyze:
-                if _is_market_open():
-                    logger.info("Market opened — stopping overnight batch")
-                    break
-                if ticker not in _scan_queued and ticker not in _active_tasks:
-                    _scan_queued.add(ticker)
-                    _last_analysis_time[ticker] = time.monotonic()
-                    await _scan_queue.put(ticker)
-
-            # Wait for the queued batch to finish before sleeping
-            await _scan_queue.join()
-            logger.info("Overnight analysis pass complete")
-            await asyncio.sleep(1800)
-
+            await asyncio.sleep(3600)
     except asyncio.CancelledError:
         pass
 
