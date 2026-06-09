@@ -10,7 +10,7 @@ from typing import Any
 import litellm
 
 from shared.config import Settings
-from shared.llm_client import get_completion_kwargs, tool_call_to_dict
+from shared.llm_client import get_completion_kwargs
 from shared.models import (
     ChartAnalysis,
     InvestmentRecommendation,
@@ -23,47 +23,54 @@ from shared.models import (
 
 from risk_agent.scorers.risk_scorer import RiskScorer
 from risk_agent.scorers.portfolio import PortfolioAnalyzer
-from risk_agent.tools import RISK_TOOLS
 
 logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = """\
-You are a senior portfolio manager and quantitative risk analyst at a tier-1 investment firm.
-You synthesize technical analysis, fundamental data, sentiment signals, and quantitative risk metrics \
-to produce institutional-grade investment recommendations.
-
-Your recommendation framework:
-1. **Signal Aggregation**: Weigh technical (30%), fundamental (35%), sentiment (20%), risk (15%)
-2. **Risk-Adjusted Conviction**: Only issue STRONG BUY/SELL signals with >75% confidence
-3. **Scenario Analysis**: Always define bull, base, and bear cases with price targets
-4. **Risk Identification**: Be explicit about tail risks, not just average-case scenarios
-5. **Time Horizon**: Calibrate to medium-term (30-90 day) unless specifically justified
-6. **Contrarian Check**: When sentiment is extreme, consider the contrarian view
+You are a senior portfolio manager. Analyze the provided data and respond ONLY with a JSON object.
 
 Decision rules:
-- STRONG_BUY: Risk-adjusted score ≥80, confidence ≥0.80, risk ≤ MODERATE
-- BUY: Risk-adjusted score ≥65, confidence ≥0.65
-- HOLD: Mixed signals or risk-adjusted score 40-65
-- SELL: Risk-adjusted score ≤35, confidence ≥0.65
-- STRONG_SELL: Risk-adjusted score ≤20, confidence ≥0.80
+- STRONG_BUY: risk-adjusted score ≥80, confidence ≥0.80, risk ≤ MODERATE
+- BUY: risk-adjusted score ≥65, confidence ≥0.65
+- HOLD: mixed signals or score 40-65
+- SELL: score ≤35, confidence ≥0.65
+- STRONG_SELL: score ≤20, confidence ≥0.80
 
-Use ALL available tools to gather data before forming your recommendation.
-Your analysis must be evidence-based, not opinion-based. Cite specific metrics.
+Signal weights: technical 30%, fundamental 35%, sentiment 20%, risk 15%
 """
+
+_RESPONSE_SCHEMA = """\
+Respond with ONLY this JSON (no markdown, no explanation):
+{
+  "signal": "BUY|STRONG_BUY|HOLD|SELL|STRONG_SELL",
+  "confidence": 0.0,
+  "risk_level": "LOW|MODERATE|HIGH|VERY_HIGH",
+  "target_price_bull": 0.0,
+  "target_price_base": 0.0,
+  "target_price_bear": 0.0,
+  "stop_loss": 0.0,
+  "time_horizon_days": 30,
+  "technical_score": 0,
+  "fundamental_score": 0,
+  "sentiment_score": 0,
+  "risk_adjusted_score": 0,
+  "executive_summary": "...",
+  "bull_case": "...",
+  "bear_case": "...",
+  "key_risks": ["..."],
+  "key_catalysts": ["..."]
+}"""
 
 
 class RiskAgent:
     """
-    Agentic risk analyst and recommendation engine powered by any LiteLLM-compatible provider.
-
-    Synthesizes market data + sentiment into actionable investment recommendations
-    with quantitative risk metrics, price targets, and position sizing.
+    Risk analyst: one LLM call per analysis (all data in prompt).
+    ~4K tokens vs previous ~17K multi-tool-call approach.
     """
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._model = settings.risk_agent_model
-        self._fallbacks = settings.risk_agent_fallback_list
         self._completion_kwargs = get_completion_kwargs(settings, self._model)
         self._risk_scorer = RiskScorer()
         self._portfolio = PortfolioAnalyzer()
@@ -81,76 +88,21 @@ class RiskAgent:
         risk_metrics_raw = await self._risk_scorer.compute(ticker)
         risk_metrics = self._build_risk_metrics(ticker, risk_metrics_raw)
 
-        cache: dict[str, Any] = {
-            "stock_data": stock_data,
-            "sentiment_data": sentiment_data,
-            "risk_metrics": risk_metrics_raw,
-            "chart_analysis": chart_analysis,
-        }
+        prompt = self._build_prompt(stock_data, sentiment_data, chart_analysis, risk_metrics_raw)
 
-        chart_note = (
-            f" Chart analysis is also available (signal: {chart_analysis.chart_signal}, "
-            f"trend: {chart_analysis.trend})."
-            if chart_analysis else ""
-        )
-
-        messages: list[dict[str, Any]] = [
+        messages = [
             {"role": "system", "content": _SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": (
-                    f"Generate a comprehensive investment recommendation for **{ticker}** "
-                    f"({stock_data.company_name}) at current price ${stock_data.current_price:.2f}. "
-                    f"Market data analysis, sentiment analysis, and chart vision analysis have already been completed.{chart_note} "
-                    f"Use all available tools to retrieve the data, then submit your final recommendation."
-                ),
-            },
+            {"role": "user", "content": prompt},
         ]
 
-        recommendation_result: dict[str, Any] | None = None
-
-        while True:
-            response = await self._call_with_retry(messages)
-
-            choice = response.choices[0]
-
-            if choice.finish_reason == "stop":
-                break
-
-            tool_calls = getattr(choice.message, "tool_calls", None) or []
-            if not tool_calls:
-                break
-
-            messages.append({
-                "role": "assistant",
-                "content": choice.message.content,
-                "tool_calls": [tool_call_to_dict(tc) for tc in tool_calls],
-            })
-
-            for tc in tool_calls:
-                tool_name = tc.function.name
-                tool_input: dict[str, Any] = json.loads(tc.function.arguments)
-
-                result = await self._execute_tool(tool_name, tool_input, cache)
-
-                if tool_name == "submit_recommendation":
-                    recommendation_result = tool_input
-
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": json.dumps(result),
-                })
-
-            if recommendation_result is not None:
-                break
-
+        result = await self._call_with_retry(messages)
         duration = time.monotonic() - start
+
         recommendation = self._build_recommendation(
             stock_data=stock_data,
             sentiment_data=sentiment_data,
             risk_metrics=risk_metrics,
-            result=recommendation_result or {},
+            result=result,
             duration=duration,
         )
         logger.info(
@@ -164,139 +116,112 @@ class RiskAgent:
         )
         return recommendation
 
+    def _build_prompt(
+        self,
+        sd: StockData,
+        sent: SentimentData,
+        ca: ChartAnalysis | None,
+        risk_raw: dict[str, Any],
+    ) -> str:
+        t = sd.technicals
+        f = sd.fundamentals
+
+        lines = [
+            f"Analyze {sd.ticker} ({sd.company_name}) at ${sd.current_price:.2f}:",
+            "",
+            "MARKET DATA:",
+            f"  Price change: {sd.price_change_pct:.1f}%  52w H/L: {sd.week_52_high}/{sd.week_52_low}",
+            f"  RSI: {t.rsi_14}  MACD: {t.macd}/{t.macd_signal}  ADX: {t.adx}",
+            f"  SMA50: {t.sma_50}  SMA200: {t.sma_200}  ATR: {t.atr_14}",
+            f"  P/E: {f.pe_ratio}  Fwd P/E: {f.forward_pe}  PEG: {f.peg_ratio}  Beta: {f.beta}",
+            f"  ROE: {f.return_on_equity}  Rev growth: {f.revenue_growth_yoy}  Margin: {f.profit_margin}",
+            f"  D/E: {f.debt_to_equity}  Sector: {f.sector}",
+        ]
+        if sd.technical_summary:
+            lines.append(f"  Technical: {sd.technical_summary[:200]}")
+        if sd.fundamental_summary:
+            lines.append(f"  Fundamental: {sd.fundamental_summary[:200]}")
+
+        lines += [
+            "",
+            "SENTIMENT:",
+            f"  Label: {sent.label}  Score: {sent.overall_score}  Mentions: {sent.total_mentions}",
+        ]
+        if sent.sentiment_summary:
+            lines.append(f"  {sent.sentiment_summary[:200]}")
+
+        if ca:
+            lines += [
+                "",
+                "CHART:",
+                f"  Trend: {ca.trend} ({ca.trend_strength})  Signal: {ca.chart_signal}  Conf: {ca.confidence}",
+                f"  Support: {ca.support_levels[:3]}  Resistance: {ca.resistance_levels[:3]}",
+            ]
+            if ca.patterns:
+                lines.append(f"  Patterns: {[p.name for p in ca.patterns[:3]]}")
+            if ca.chart_summary:
+                lines.append(f"  {ca.chart_summary[:200]}")
+
+        lines += [
+            "",
+            "RISK METRICS:",
+            f"  Vol30d: {risk_raw.get('historical_volatility_30d')}  VaR95: {risk_raw.get('value_at_risk_95')}",
+            f"  Beta: {risk_raw.get('beta')}  Sharpe: {risk_raw.get('sharpe_ratio')}  MaxDD: {risk_raw.get('max_drawdown')}",
+            "",
+            _RESPONSE_SCHEMA,
+        ]
+        return "\n".join(lines)
+
     @staticmethod
     def _parse_retry_seconds(error_str: str) -> float:
-        """Parse 'try again in Xm Y.Zs' or 'try again in Y.Zs' into total seconds."""
         m = re.search(r"try again in (?:(\d+)m\s*)?([0-9.]+)s", error_str)
         if not m:
             return 35.0
-        minutes = float(m.group(1) or 0)
-        seconds = float(m.group(2))
-        return minutes * 60 + seconds + 3.0
+        return float(m.group(1) or 0) * 60 + float(m.group(2)) + 3.0
 
-    async def _call_with_retry(self, messages: list[dict[str, Any]], max_retries: int = 4) -> Any:
-        """Call litellm without fallbacks; on TPM RateLimitError sleep and retry; on TPD raise immediately."""
+    async def _call_with_retry(self, messages: list[dict[str, Any]], max_retries: int = 4) -> dict[str, Any]:
+        """Single LLM call; on TPM RateLimitError sleep and retry; on TPD raise immediately."""
         for attempt in range(max_retries):
             try:
-                return await litellm.acompletion(
+                response = await litellm.acompletion(
                     model=self._model,
-                    max_tokens=2048,
+                    max_tokens=1024,
                     messages=messages,
-                    tools=RISK_TOOLS,
-                    parallel_tool_calls=False,
                     **self._completion_kwargs,
                 )
+                content = response.choices[0].message.content or ""
+                return self._parse_json(content)
             except litellm.RateLimitError as exc:
                 err = str(exc)
-                # Daily quota exhausted — no point retrying, raises immediately
                 if "per day" in err or "tokens per day" in err or "TPD" in err:
                     logger.error("Groq daily token quota (TPD) exhausted — stopping analysis")
                     raise
                 if attempt == max_retries - 1:
                     raise
                 wait = self._parse_retry_seconds(err)
-                logger.warning(
-                    "Groq TPM rate limit — retrying in %.1fs (attempt %d/%d)",
-                    wait, attempt + 1, max_retries,
-                )
+                logger.warning("Groq TPM rate limit — retrying in %.1fs (attempt %d/%d)", wait, attempt + 1, max_retries)
                 await asyncio.sleep(wait)
         raise RuntimeError("unreachable")  # pragma: no cover
 
-    async def _execute_tool(
-        self, name: str, input_data: dict[str, Any], cache: dict[str, Any]
-    ) -> Any:
-        logger.debug("Executing tool", extra={"tool": name})
-
-        if name == "get_quantitative_risk_metrics":
-            return cache["risk_metrics"]
-
-        if name == "get_market_data_summary":
-            sd: StockData = cache["stock_data"]
-            t = sd.technicals
-            f = sd.fundamentals
-            return {
-                "ticker": sd.ticker,
-                "company": sd.company_name,
-                "sector": f.sector,
-                "price": sd.current_price,
-                "change_pct": sd.price_change_pct,
-                "week_52_high": sd.week_52_high,
-                "week_52_low": sd.week_52_low,
-                "rsi_14": t.rsi_14,
-                "macd": t.macd,
-                "macd_signal": t.macd_signal,
-                "sma_50": t.sma_50,
-                "sma_200": t.sma_200,
-                "adx": t.adx,
-                "atr_14": t.atr_14,
-                "pe_ratio": f.pe_ratio,
-                "forward_pe": f.forward_pe,
-                "peg_ratio": f.peg_ratio,
-                "beta": f.beta,
-                "debt_to_equity": f.debt_to_equity,
-                "return_on_equity": f.return_on_equity,
-                "revenue_growth_yoy": f.revenue_growth_yoy,
-                "profit_margin": f.profit_margin,
-                "technical_summary": (sd.technical_summary or "")[:300],
-                "fundamental_summary": (sd.fundamental_summary or "")[:300],
-            }
-
-        if name == "get_sentiment_summary":
-            sent: SentimentData = cache["sentiment_data"]
-            return {
-                "ticker": sent.ticker,
-                "overall_score": sent.overall_score,
-                "label": sent.label,
-                "reddit_score": sent.reddit_score,
-                "news_score": sent.news_score,
-                "total_mentions": sent.total_mentions,
-                "sentiment_summary": (sent.sentiment_summary or "")[:300],
-            }
-
-        if name == "compute_position_sizing":
-            sd = cache["stock_data"]
-            direction = input_data.get("signal_direction", "bullish")
-            portfolio_value = input_data.get("portfolio_value", 100_000.0)
-            atr = sd.technicals.atr_14 or (sd.current_price * 0.02)
-
-            sizing = self._portfolio.position_size_from_atr(
-                portfolio_value=portfolio_value,
-                atr=atr,
-                current_price=sd.current_price,
-            )
-            targets = self._portfolio.compute_price_targets(
-                current_price=sd.current_price,
-                atr=atr,
-                signal_direction=direction,
-            )
-            return {**sizing, **targets}
-
-        if name == "get_chart_analysis":
-            ca: ChartAnalysis | None = cache.get("chart_analysis")
-            if ca is None:
-                return {"available": False, "reason": "Chart vision analysis was not performed"}
-            return {
-                "available": True,
-                "ticker": ca.ticker,
-                "timeframe": ca.timeframe,
-                "trend": ca.trend,
-                "trend_strength": ca.trend_strength,
-                "chart_signal": ca.chart_signal,
-                "confidence": ca.confidence,
-                "patterns": [
-                    {"name": p.name, "confidence": p.confidence, "implication": p.implication}
-                    for p in ca.patterns
-                ],
-                "support_levels": ca.support_levels,
-                "resistance_levels": ca.resistance_levels,
-                "chart_summary": (ca.chart_summary or "")[:300],
-                "used_vision": ca.used_vision,
-            }
-
-        if name == "submit_recommendation":
-            return {"status": "submitted"}
-
-        return {"error": f"Unknown tool: {name}"}
+    @staticmethod
+    def _parse_json(content: str) -> dict[str, Any]:
+        """Extract JSON from model response, stripping markdown fences if present."""
+        content = content.strip()
+        # Strip ```json ... ``` or ``` ... ``` fences
+        content = re.sub(r"^```(?:json)?\s*", "", content)
+        content = re.sub(r"\s*```$", "", content)
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            # Try to find the first {...} block
+            m = re.search(r"\{.*\}", content, re.DOTALL)
+            if m:
+                try:
+                    return json.loads(m.group())
+                except json.JSONDecodeError:
+                    pass
+        logger.warning("RiskAgent: could not parse JSON from response, returning empty")
+        return {}
 
     @staticmethod
     def _to_list(value: Any) -> list[str]:
